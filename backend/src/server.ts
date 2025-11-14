@@ -13,7 +13,17 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(helmet());
-app.use(compression());
+// Disable compression for Server-Sent Events (SSE) endpoints
+app.use(compression({
+  filter: (req: Request, res: Response) => {
+    // Don't compress SSE streams
+    if (req.path.includes('/stream')) {
+      return false;
+    }
+    // Use default compression for everything else
+    return compression.filter(req, res);
+  }
+}));
 
 // CORS configuration
 const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [
