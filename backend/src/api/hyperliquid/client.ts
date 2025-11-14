@@ -88,16 +88,24 @@ export class HyperliquidClient {
    */
   async getFundingHistoryBatch(
     coins: string[],
-    delayMs: number = 100
+    delayMs: number = 100,
+    onProgress?: (currentCoin: string, processed: number) => void
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
 
     logger.info(`Fetching funding history for ${coins.length} assets`);
 
+    let processed = 0;
     for (const coin of coins) {
       try {
         const data = await this.getFundingHistory(coin);
         results.set(coin, data);
+
+        processed++;
+        // Emit progress callback
+        if (onProgress) {
+          onProgress(coin, processed);
+        }
 
         // Add delay to avoid rate limiting
         if (delayMs > 0) {
@@ -106,6 +114,10 @@ export class HyperliquidClient {
       } catch (error) {
         logger.error(`Failed to fetch funding history for ${coin}`, error);
         results.set(coin, []);
+        processed++;
+        if (onProgress) {
+          onProgress(coin, processed);
+        }
       }
     }
 

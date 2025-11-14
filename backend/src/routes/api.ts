@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import DataFetcherService from '../services/dataFetcher';
+import { DataFetcherService, ProgressEvent } from '../services/dataFetcher';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
@@ -8,14 +8,93 @@ import { logger } from '../utils/logger';
 const router = Router();
 
 /**
+ * GET /api/fetch/stream
+ * Server-Sent Events endpoint for initial data fetch with real-time progress
+ */
+router.get('/fetch/stream', async (req: Request, res: Response) => {
+  // Set headers for SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  logger.info('SSE stream started for initial fetch');
+
+  // Create a new DataFetcherService instance for this request
+  const fetcher = new DataFetcherService();
+
+  // Set up progress listener
+  const progressListener = (event: ProgressEvent) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+
+  fetcher.on('progress', progressListener);
+
+  try {
+    // Start the fetch
+    await fetcher.fetchInitialData();
+
+    // Close the connection
+    res.write('data: {"type":"done"}\n\n');
+    res.end();
+  } catch (error) {
+    logger.error('SSE fetch error', error);
+    res.write(`data: ${JSON.stringify({ type: 'error', message: `${error}` })}\n\n`);
+    res.end();
+  } finally {
+    fetcher.removeListener('progress', progressListener);
+  }
+});
+
+/**
+ * GET /api/fetch/incremental/stream
+ * Server-Sent Events endpoint for incremental fetch with real-time progress
+ */
+router.get('/fetch/incremental/stream', async (req: Request, res: Response) => {
+  // Set headers for SSE
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  logger.info('SSE stream started for incremental fetch');
+
+  // Create a new DataFetcherService instance for this request
+  const fetcher = new DataFetcherService();
+
+  // Set up progress listener
+  const progressListener = (event: ProgressEvent) => {
+    res.write(`data: ${JSON.stringify(event)}\n\n`);
+  };
+
+  fetcher.on('progress', progressListener);
+
+  try {
+    // Start the fetch
+    await fetcher.fetchIncrementalData();
+
+    // Close the connection
+    res.write('data: {"type":"done"}\n\n');
+    res.end();
+  } catch (error) {
+    logger.error('SSE incremental fetch error', error);
+    res.write(`data: ${JSON.stringify({ type: 'error', message: `${error}` })}\n\n`);
+    res.end();
+  } finally {
+    fetcher.removeListener('progress', progressListener);
+  }
+});
+
+/**
  * POST /api/fetch
- * Manually trigger initial data fetch
+ * Manually trigger initial data fetch (without streaming)
  */
 router.post('/fetch', async (req: Request, res: Response) => {
   try {
     logger.info('Manual fetch triggered');
 
-    const result = await DataFetcherService.fetchInitialData();
+    const fetcher = new DataFetcherService();
+    const result = await fetcher.fetchInitialData();
 
     res.json({
       success: true,
@@ -34,13 +113,14 @@ router.post('/fetch', async (req: Request, res: Response) => {
 
 /**
  * POST /api/fetch/incremental
- * Manually trigger incremental data fetch
+ * Manually trigger incremental data fetch (without streaming)
  */
 router.post('/fetch/incremental', async (req: Request, res: Response) => {
   try {
     logger.info('Manual incremental fetch triggered');
 
-    const result = await DataFetcherService.fetchIncrementalData();
+    const fetcher = new DataFetcherService();
+    const result = await fetcher.fetchIncrementalData();
 
     res.json({
       success: true,
