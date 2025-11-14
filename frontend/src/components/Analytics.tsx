@@ -28,6 +28,9 @@ export default function Analytics({ asset, platform }: AnalyticsProps) {
   const positivePercentage = (data.positive_count / data.total_records) * 100;
   const negativePercentage = (data.negative_count / data.total_records) * 100;
 
+  // Calculate annualized rate (funding rate paid every 8 hours = 3 times per day)
+  const annualizedRate = parseFloat(data.avg_funding_rate) * 3 * 365;
+
   return (
     <div className="bg-white rounded-lg shadow p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-4">
@@ -43,9 +46,12 @@ export default function Analytics({ asset, platform }: AnalyticsProps) {
 
         {/* Average Funding Rate */}
         <div className="border border-gray-200 rounded-lg p-4">
-          <p className="text-xs text-gray-500 mb-1">Average Rate</p>
+          <p className="text-xs text-gray-500 mb-1">Average Rate (8h)</p>
           <p className={`text-2xl font-bold ${parseFloat(data.avg_funding_rate) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
             {formatPercentage(data.avg_funding_rate)}
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            ({(annualizedRate * 100).toFixed(2)}% annualized)
           </p>
         </div>
 
