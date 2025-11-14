@@ -48,8 +48,11 @@ export default function DataFetcher() {
         if (data.type === 'done') {
           eventSource.close();
           setInitialFetching(false);
+          // Invalidate all data queries to refresh UI with new data
           queryClient.invalidateQueries({ queryKey: ['status'] });
           queryClient.invalidateQueries({ queryKey: ['assets'] });
+          queryClient.invalidateQueries({ queryKey: ['analytics'] });
+          queryClient.invalidateQueries({ queryKey: ['fundingRates'] });
         }
         return;
       }
@@ -60,8 +63,11 @@ export default function DataFetcher() {
       if (data.type === 'complete' || data.type === 'error') {
         eventSource.close();
         setInitialFetching(false);
+        // Invalidate all data queries to refresh UI with new data
         queryClient.invalidateQueries({ queryKey: ['status'] });
         queryClient.invalidateQueries({ queryKey: ['assets'] });
+        queryClient.invalidateQueries({ queryKey: ['analytics'] });
+        queryClient.invalidateQueries({ queryKey: ['fundingRates'] });
       }
     };
 
@@ -99,8 +105,11 @@ export default function DataFetcher() {
         if (data.type === 'done') {
           eventSource.close();
           setIncrementalFetching(false);
+          // Invalidate all data queries to refresh UI with new data
           queryClient.invalidateQueries({ queryKey: ['status'] });
           queryClient.invalidateQueries({ queryKey: ['assets'] });
+          queryClient.invalidateQueries({ queryKey: ['analytics'] });
+          queryClient.invalidateQueries({ queryKey: ['fundingRates'] });
         }
         return;
       }
@@ -110,8 +119,11 @@ export default function DataFetcher() {
       if (data.type === 'complete' || data.type === 'error') {
         eventSource.close();
         setIncrementalFetching(false);
+        // Invalidate all data queries to refresh UI with new data
         queryClient.invalidateQueries({ queryKey: ['status'] });
         queryClient.invalidateQueries({ queryKey: ['assets'] });
+        queryClient.invalidateQueries({ queryKey: ['analytics'] });
+        queryClient.invalidateQueries({ queryKey: ['fundingRates'] });
       }
     };
 
