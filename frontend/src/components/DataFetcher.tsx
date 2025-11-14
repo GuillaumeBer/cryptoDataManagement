@@ -40,8 +40,8 @@ export default function DataFetcher() {
     setInitialFetching(true);
     setInitialProgress(null);
 
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-    const eventSource = new EventSource(`${apiUrl}/api/fetch/stream`);
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+    const eventSource = new EventSource(`${apiUrl}/fetch/stream`);
     initialEventSourceRef.current = eventSource;
 
     eventSource.onmessage = (event) => {
@@ -87,8 +87,8 @@ export default function DataFetcher() {
     setIncrementalFetching(true);
     setIncrementalProgress(null);
 
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-    const eventSource = new EventSource(`${apiUrl}/api/fetch/incremental/stream`);
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+    const eventSource = new EventSource(`${apiUrl}/fetch/incremental/stream`);
     incrementalEventSourceRef.current = eventSource;
 
     eventSource.onmessage = (event) => {
