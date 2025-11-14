@@ -18,6 +18,10 @@ router.get('/fetch/stream', async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable buffering for nginx
+
+  // Flush headers to establish SSE connection
+  res.flushHeaders();
 
   logger.info('SSE stream started for initial fetch');
 
@@ -26,10 +30,14 @@ router.get('/fetch/stream', async (req: Request, res: Response) => {
 
   // Set up progress listener
   const progressListener = (event: ProgressEvent) => {
+    logger.debug(`Progress event: ${event.type}, ${event.processedAssets}/${event.totalAssets}`);
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   };
 
   fetcher.on('progress', progressListener);
+
+  // Send initial connection event
+  res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
 
   try {
     // Start the fetch
@@ -57,6 +65,10 @@ router.get('/fetch/incremental/stream', async (req: Request, res: Response) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable buffering for nginx
+
+  // Flush headers to establish SSE connection
+  res.flushHeaders();
 
   logger.info('SSE stream started for incremental fetch');
 
@@ -65,10 +77,14 @@ router.get('/fetch/incremental/stream', async (req: Request, res: Response) => {
 
   // Set up progress listener
   const progressListener = (event: ProgressEvent) => {
+    logger.debug(`Incremental progress event: ${event.type}, ${event.processedAssets}/${event.totalAssets}`);
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   };
 
   fetcher.on('progress', progressListener);
+
+  // Send initial connection event
+  res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
 
   try {
     // Start the fetch

@@ -47,11 +47,14 @@ export default function DataFetcher() {
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
 
-      if (data.type === 'done') {
-        eventSource.close();
-        setInitialFetching(false);
-        queryClient.invalidateQueries({ queryKey: ['status'] });
-        queryClient.invalidateQueries({ queryKey: ['assets'] });
+      // Ignore connection confirmation events
+      if (data.type === 'connected' || data.type === 'done') {
+        if (data.type === 'done') {
+          eventSource.close();
+          setInitialFetching(false);
+          queryClient.invalidateQueries({ queryKey: ['status'] });
+          queryClient.invalidateQueries({ queryKey: ['assets'] });
+        }
         return;
       }
 
@@ -94,11 +97,14 @@ export default function DataFetcher() {
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data);
 
-      if (data.type === 'done') {
-        eventSource.close();
-        setIncrementalFetching(false);
-        queryClient.invalidateQueries({ queryKey: ['status'] });
-        queryClient.invalidateQueries({ queryKey: ['assets'] });
+      // Ignore connection confirmation events
+      if (data.type === 'connected' || data.type === 'done') {
+        if (data.type === 'done') {
+          eventSource.close();
+          setIncrementalFetching(false);
+          queryClient.invalidateQueries({ queryKey: ['status'] });
+          queryClient.invalidateQueries({ queryKey: ['assets'] });
+        }
         return;
       }
 
