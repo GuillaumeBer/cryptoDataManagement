@@ -1,0 +1,230 @@
+import { Router, Request, Response } from 'express';
+import DataFetcherService from '../services/dataFetcher';
+import AssetRepository from '../models/AssetRepository';
+import FundingRateRepository from '../models/FundingRateRepository';
+import FetchLogRepository from '../models/FetchLogRepository';
+import { logger } from '../utils/logger';
+
+const router = Router();
+
+/**
+ * POST /api/fetch
+ * Manually trigger initial data fetch
+ */
+router.post('/fetch', async (req: Request, res: Response) => {
+  try {
+    logger.info('Manual fetch triggered');
+
+    const result = await DataFetcherService.fetchInitialData();
+
+    res.json({
+      success: true,
+      message: 'Data fetch completed',
+      data: result,
+    });
+  } catch (error) {
+    logger.error('Fetch endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch data',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
+ * POST /api/fetch/incremental
+ * Manually trigger incremental data fetch
+ */
+router.post('/fetch/incremental', async (req: Request, res: Response) => {
+  try {
+    logger.info('Manual incremental fetch triggered');
+
+    const result = await DataFetcherService.fetchIncrementalData();
+
+    res.json({
+      success: true,
+      message: 'Incremental fetch completed',
+      data: result,
+    });
+  } catch (error) {
+    logger.error('Incremental fetch endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch incremental data',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
+ * GET /api/status
+ * Get system status and last fetch information
+ */
+router.get('/status', async (req: Request, res: Response) => {
+  try {
+    const status = await DataFetcherService.getStatus();
+
+    res.json({
+      success: true,
+      data: status,
+    });
+  } catch (error) {
+    logger.error('Status endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get status',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
+ * GET /api/assets
+ * List all available assets
+ */
+router.get('/assets', async (req: Request, res: Response) => {
+  try {
+    const { platform } = req.query;
+
+    const assets = platform
+      ? await AssetRepository.findByPlatform(platform as string)
+      : await AssetRepository.findAllActive();
+
+    res.json({
+      success: true,
+      data: assets,
+      count: assets.length,
+    });
+  } catch (error) {
+    logger.error('Assets endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch assets',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
+ * GET /api/funding-rates
+ * Get funding rates with filters
+ * Query params: asset, startDate, endDate, platform, limit, offset
+ */
+router.get('/funding-rates', async (req: Request, res: Response) => {
+  try {
+    const { asset, startDate, endDate, platform, limit, offset } = req.query;
+
+    const query: any = {
+      asset: asset as string,
+      platform: platform as string,
+      limit: limit ? parseInt(limit as string) : 1000,
+      offset: offset ? parseInt(offset as string) : 0,
+    };
+
+    if (startDate) {
+      query.startDate = new Date(startDate as string);
+    }
+
+    if (endDate) {
+      query.endDate = new Date(endDate as string);
+    }
+
+    const fundingRates = await FundingRateRepository.find(query);
+
+    res.json({
+      success: true,
+      data: fundingRates,
+      count: fundingRates.length,
+      query: {
+        asset: query.asset || 'all',
+        platform: query.platform || 'all',
+        startDate: query.startDate,
+        endDate: query.endDate,
+        limit: query.limit,
+        offset: query.offset,
+      },
+    });
+  } catch (error) {
+    logger.error('Funding rates endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch funding rates',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
+ * GET /api/analytics/:asset
+ * Get analytics for specific asset
+ */
+router.get('/analytics/:asset', async (req: Request, res: Response) => {
+  try {
+    const { asset } = req.params;
+    const { platform = 'hyperliquid' } = req.query;
+
+    const analytics = await FundingRateRepository.getAssetAnalytics(
+      asset,
+      platform as string
+    );
+
+    if (!analytics) {
+      return res.status(404).json({
+        success: false,
+        message: `Asset ${asset} not found`,
+      });
+    }
+
+    res.json({
+      success: true,
+      data: analytics,
+    });
+  } catch (error) {
+    logger.error('Analytics endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch analytics',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
+ * GET /api/logs
+ * Get recent fetch logs
+ */
+router.get('/logs', async (req: Request, res: Response) => {
+  try {
+    const { limit = '10' } = req.query;
+
+    const logs = await FetchLogRepository.getRecent(parseInt(limit as string));
+
+    res.json({
+      success: true,
+      data: logs,
+      count: logs.length,
+    });
+  } catch (error) {
+    logger.error('Logs endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch logs',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
+ * GET /api/health
+ * Health check endpoint
+ */
+router.get('/health', (req: Request, res: Response) => {
+  res.json({
+    success: true,
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+  });
+});
+
+export default router;
