@@ -47,7 +47,7 @@ export class DataFetcherService {
       const assetSymbols = assets.map((a) => a.name);
       const fundingDataMap = await this.hyperliquidClient.getFundingHistoryBatch(
         assetSymbols,
-        100 // 100ms delay between requests
+        1000 // 1000ms (1 second) delay between requests to avoid rate limiting
       );
 
       // Step 3: Store funding rate data
@@ -136,7 +136,7 @@ export class DataFetcherService {
       const assetSymbols = assets.map((a) => a.symbol);
       const fundingDataMap = await this.hyperliquidClient.getFundingHistoryBatch(
         assetSymbols,
-        100
+        1000
       );
 
       // Store only new records
