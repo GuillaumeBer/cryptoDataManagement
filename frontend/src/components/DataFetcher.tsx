@@ -20,25 +20,13 @@ export default function DataFetcher() {
   const initialEventSourceRef = useRef<EventSource | null>(null);
   const incrementalEventSourceRef = useRef<EventSource | null>(null);
 
-  // Cleanup event sources on unmount
-  useEffect(() => {
-    return () => {
-      if (initialEventSourceRef.current) {
-        initialEventSourceRef.current.close();
-      }
-      if (incrementalEventSourceRef.current) {
-        incrementalEventSourceRef.current.close();
-      }
-    };
-  }, []);
-
-  const handleInitialFetch = () => {
+  // Connect to initial fetch SSE stream
+  const connectToInitialFetch = () => {
     if (initialEventSourceRef.current) {
       initialEventSourceRef.current.close();
     }
 
     setInitialFetching(true);
-    setInitialProgress(null);
 
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
     console.log('[FRONTEND] Opening EventSource:', `${apiUrl}/fetch/stream`);
@@ -91,13 +79,13 @@ export default function DataFetcher() {
     };
   };
 
-  const handleIncrementalFetch = () => {
+  // Connect to incremental fetch SSE stream
+  const connectToIncrementalFetch = () => {
     if (incrementalEventSourceRef.current) {
       incrementalEventSourceRef.current.close();
     }
 
     setIncrementalFetching(true);
-    setIncrementalProgress(null);
 
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
     const eventSource = new EventSource(`${apiUrl}/fetch/incremental/stream`);
@@ -139,6 +127,65 @@ export default function DataFetcher() {
         percentage: 0,
       });
     };
+  };
+
+  // Check for ongoing fetches on component mount
+  useEffect(() => {
+    const checkOngoingFetch = async () => {
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+        const response = await fetch(`${apiUrl}/status`);
+        const status = await response.json();
+
+        console.log('[FRONTEND] Status check:', status);
+
+        // Reconnect to ongoing initial fetch
+        if (status.fetchInProgress?.isInitialFetchInProgress) {
+          console.log('[FRONTEND] Detected ongoing initial fetch, reconnecting...');
+          if (status.fetchInProgress.currentProgress) {
+            setInitialProgress(status.fetchInProgress.currentProgress);
+          }
+          connectToInitialFetch();
+        }
+
+        // Reconnect to ongoing incremental fetch
+        if (status.fetchInProgress?.isIncrementalFetchInProgress) {
+          console.log('[FRONTEND] Detected ongoing incremental fetch, reconnecting...');
+          if (status.fetchInProgress.currentProgress) {
+            setIncrementalProgress(status.fetchInProgress.currentProgress);
+          }
+          connectToIncrementalFetch();
+        }
+      } catch (error) {
+        console.error('[FRONTEND] Failed to check status:', error);
+      }
+    };
+
+    checkOngoingFetch();
+  }, []); // Only run on mount
+
+  // Cleanup event sources on unmount
+  useEffect(() => {
+    return () => {
+      if (initialEventSourceRef.current) {
+        initialEventSourceRef.current.close();
+      }
+      if (incrementalEventSourceRef.current) {
+        incrementalEventSourceRef.current.close();
+      }
+    };
+  }, []);
+
+  const handleInitialFetch = () => {
+    // Clear progress before starting new fetch
+    setInitialProgress(null);
+    connectToInitialFetch();
+  };
+
+  const handleIncrementalFetch = () => {
+    // Clear progress before starting new fetch
+    setIncrementalProgress(null);
+    connectToIncrementalFetch();
   };
 
   const renderProgress = (progress: ProgressEvent | null, isFetching: boolean) => {
