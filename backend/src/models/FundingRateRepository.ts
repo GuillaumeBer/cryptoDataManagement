@@ -125,6 +125,32 @@ export class FundingRateRepository {
   }
 
   /**
+   * Get staleness info (days since last update) for all assets
+   */
+  async getAssetStaleness(platform: string): Promise<Map<number, number>> {
+    const result = await query<{ asset_id: number; days_stale: number }>(
+      `SELECT
+        a.id as asset_id,
+        COALESCE(
+          EXTRACT(DAY FROM (NOW() - MAX(fr.timestamp)))::int,
+          999
+        ) as days_stale
+       FROM assets a
+       LEFT JOIN funding_rates fr ON a.id = fr.asset_id AND fr.platform = $1
+       WHERE a.platform = $1
+       GROUP BY a.id`,
+      [platform]
+    );
+
+    const stalenessMap = new Map<number, number>();
+    for (const row of result.rows) {
+      stalenessMap.set(row.asset_id, row.days_stale);
+    }
+
+    return stalenessMap;
+  }
+
+  /**
    * Get analytics for a specific asset
    */
   async getAssetAnalytics(symbol: string, platform: string): Promise<AssetAnalytics | null> {

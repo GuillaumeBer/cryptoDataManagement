@@ -225,9 +225,21 @@ router.get('/assets', async (req: Request, res: Response) => {
       ? await AssetRepository.findByPlatform(platform as string)
       : await AssetRepository.findAllActive();
 
+    // Get staleness info for assets (only if platform is specified)
+    let stalenessMap: Map<number, number> | null = null;
+    if (platform) {
+      stalenessMap = await FundingRateRepository.getAssetStaleness(platform as string);
+    }
+
+    // Add staleness info to each asset
+    const assetsWithStaleness = assets.map(asset => ({
+      ...asset,
+      daysStale: stalenessMap ? (stalenessMap.get(asset.id) || 999) : undefined,
+    }));
+
     res.json({
       success: true,
-      data: assets,
+      data: assetsWithStaleness,
       count: assets.length,
     });
   } catch (error) {

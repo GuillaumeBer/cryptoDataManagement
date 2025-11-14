@@ -7,6 +7,7 @@ export interface Asset {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  daysStale?: number; // Number of days since last funding rate update
 }
 
 export interface FundingRate {
