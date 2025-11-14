@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { query, testConnection, closePool } from './connection';
