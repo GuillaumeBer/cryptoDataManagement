@@ -3,6 +3,7 @@ import HyperliquidClient from '../api/hyperliquid/client';
 import LighterClient from '../api/lighter/client';
 import AsterClient from '../api/aster/client';
 import EdgeXClient from '../api/edgex/client';
+import BinanceClient from '../api/binance/client';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
@@ -10,7 +11,7 @@ import { CreateFundingRateParams } from '../models/types';
 import { logger } from '../utils/logger';
 
 // Union type for all platform clients
-type PlatformClient = HyperliquidClient | LighterClient | AsterClient | EdgeXClient;
+type PlatformClient = HyperliquidClient | LighterClient | AsterClient | EdgeXClient | BinanceClient;
 
 export interface ProgressEvent {
   type: 'start' | 'progress' | 'complete' | 'error';
@@ -37,6 +38,9 @@ export class DataFetcherService extends EventEmitter {
     switch (this.platform) {
       case 'hyperliquid':
         this.platformClient = new HyperliquidClient();
+        break;
+      case 'binance':
+        this.platformClient = new BinanceClient();
         break;
       case 'lighter':
         this.platformClient = new LighterClient();
