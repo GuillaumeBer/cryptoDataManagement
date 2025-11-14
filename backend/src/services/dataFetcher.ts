@@ -19,10 +19,27 @@ export interface ProgressEvent {
 export class DataFetcherService extends EventEmitter {
   private hyperliquidClient: HyperliquidClient;
   private platform = 'hyperliquid';
+  private isInitialFetchInProgress = false;
+  private isIncrementalFetchInProgress = false;
+  private currentProgress: ProgressEvent | null = null;
 
   constructor() {
     super();
     this.hyperliquidClient = new HyperliquidClient();
+  }
+
+  /**
+   * Check if any fetch operation is currently in progress
+   */
+  isFetchInProgress(): boolean {
+    return this.isInitialFetchInProgress || this.isIncrementalFetchInProgress;
+  }
+
+  /**
+   * Get current progress (if any fetch is in progress)
+   */
+  getCurrentProgress(): ProgressEvent | null {
+    return this.currentProgress;
   }
 
   /**
@@ -33,6 +50,15 @@ export class DataFetcherService extends EventEmitter {
     recordsFetched: number;
     errors: string[];
   }> {
+    // Prevent concurrent fetches
+    if (this.isInitialFetchInProgress) {
+      throw new Error('Initial fetch is already in progress');
+    }
+    if (this.isIncrementalFetchInProgress) {
+      throw new Error('Incremental fetch is in progress. Please wait for it to complete.');
+    }
+
+    this.isInitialFetchInProgress = true;
     logger.info('Starting initial data fetch from Hyperliquid');
 
     const fetchLog = await FetchLogRepository.create(this.platform, 'initial');
@@ -57,14 +83,15 @@ export class DataFetcherService extends EventEmitter {
 
       // Emit start event
       console.log(`[PROGRESS] START: 0/${assets.length} assets`);
-      this.emit('progress', {
+      this.currentProgress = {
         type: 'start',
         totalAssets: assets.length,
         processedAssets: 0,
         recordsFetched: 0,
         errors: [],
         percentage: 0,
-      } as ProgressEvent);
+      };
+      this.emit('progress', this.currentProgress);
 
       // Step 2: Fetch funding history for each asset
       const assetSymbols = assets.map((a) => a.name);
@@ -74,7 +101,7 @@ export class DataFetcherService extends EventEmitter {
         (currentSymbol: string, processed: number) => {
           // Emit progress event for each asset
           console.log(`[PROGRESS] ${processed}/${assets.length} - Current: ${currentSymbol} (${Math.round((processed / assets.length) * 100)}%)`);
-          this.emit('progress', {
+          this.currentProgress = {
             type: 'progress',
             totalAssets: assets.length,
             processedAssets: processed,
@@ -82,7 +109,8 @@ export class DataFetcherService extends EventEmitter {
             recordsFetched,
             errors,
             percentage: Math.round((processed / assets.length) * 100),
-          } as ProgressEvent);
+          };
+          this.emit('progress', this.currentProgress);
         }
       );
 
@@ -131,28 +159,30 @@ export class DataFetcherService extends EventEmitter {
 
       // Emit completion event
       console.log(`[PROGRESS] COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} records fetched`);
-      this.emit('progress', {
+      this.currentProgress = {
         type: 'complete',
         totalAssets: assets.length,
         processedAssets: assetsProcessed,
         recordsFetched,
         errors,
         percentage: 100,
-      } as ProgressEvent);
+      };
+      this.emit('progress', this.currentProgress);
 
       return { assetsProcessed, recordsFetched, errors };
     } catch (error) {
       logger.error('Initial data fetch failed', error);
 
       // Emit error event
-      this.emit('progress', {
+      this.currentProgress = {
         type: 'error',
         totalAssets: 0,
         processedAssets: assetsProcessed,
         recordsFetched,
         errors: [...errors, `${error}`],
         percentage: 0,
-      } as ProgressEvent);
+      };
+      this.emit('progress', this.currentProgress);
 
       await FetchLogRepository.complete(
         fetchLog.id,
@@ -162,6 +192,10 @@ export class DataFetcherService extends EventEmitter {
         `${error}`
       );
       throw error;
+    } finally {
+      // Always clear the in-progress flag and current progress
+      this.isInitialFetchInProgress = false;
+      this.currentProgress = null;
     }
   }
 
@@ -173,6 +207,15 @@ export class DataFetcherService extends EventEmitter {
     recordsFetched: number;
     errors: string[];
   }> {
+    // Prevent concurrent fetches
+    if (this.isIncrementalFetchInProgress) {
+      throw new Error('Incremental fetch is already in progress');
+    }
+    if (this.isInitialFetchInProgress) {
+      throw new Error('Initial fetch is in progress. Please wait for it to complete.');
+    }
+
+    this.isIncrementalFetchInProgress = true;
     logger.info('Starting incremental data fetch from Hyperliquid');
 
     const fetchLog = await FetchLogRepository.create(this.platform, 'incremental');
@@ -267,6 +310,10 @@ export class DataFetcherService extends EventEmitter {
         `${error}`
       );
       throw error;
+    } finally {
+      // Always clear the in-progress flag and current progress
+      this.isIncrementalFetchInProgress = false;
+      this.currentProgress = null;
     }
   }
 
@@ -290,6 +337,11 @@ export class DataFetcherService extends EventEmitter {
             assetsProcessed: lastFetch.assets_processed,
           }
         : null,
+      fetchInProgress: {
+        isInitialFetchInProgress: this.isInitialFetchInProgress,
+        isIncrementalFetchInProgress: this.isIncrementalFetchInProgress,
+        currentProgress: this.currentProgress,
+      },
     };
   }
 }

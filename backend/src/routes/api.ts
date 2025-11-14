@@ -30,8 +30,8 @@ router.get('/fetch/stream', async (req: Request, res: Response) => {
 
   logger.info('SSE stream started for initial fetch');
 
-  // Create a new DataFetcherService instance for this request
-  const fetcher = new DataFetcherService();
+  // Use the singleton instance
+  const fetcher = DataFetcherServiceInstance;
 
   // Set up progress listener
   const progressListener = (event: ProgressEvent) => {
@@ -39,28 +39,40 @@ router.get('/fetch/stream', async (req: Request, res: Response) => {
     logger.debug(`Progress event: ${event.type}, ${event.processedAssets}/${event.totalAssets}`);
     const written = res.write(`data: ${JSON.stringify(event)}\n\n`);
     console.log(`[SSE] Write returned: ${written}`);
-    // Force flush by calling flushHeaders (no-op if already flushed) or checking drain
-    if (!written) {
-      res.once('drain', () => {
-        console.log('[SSE] Drain event fired');
-      });
-    }
   };
 
   console.log('[SSE] Setting up progress listener...');
   fetcher.on('progress', progressListener);
-  console.log('[SSE] Progress listener attached. Starting fetch...');
+  console.log('[SSE] Progress listener attached.');
 
   // Send initial connection event
   res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
 
-  try {
-    // Start the fetch
-    await fetcher.fetchInitialData();
+  // If there's already progress, send it immediately
+  const currentProgress = fetcher.getCurrentProgress();
+  if (currentProgress) {
+    console.log('[SSE] Reconnecting to ongoing fetch, sending current progress');
+    res.write(`data: ${JSON.stringify(currentProgress)}\n\n`);
+  }
 
-    // Close the connection
-    res.write('data: {"type":"done"}\n\n');
-    res.end();
+  // Handle client disconnect
+  req.on('close', () => {
+    console.log('[SSE] Client disconnected, removing listener');
+    fetcher.removeListener('progress', progressListener);
+  });
+
+  try {
+    // Only start a new fetch if none is in progress
+    if (!fetcher.isFetchInProgress()) {
+      console.log('[SSE] Starting new fetch...');
+      await fetcher.fetchInitialData();
+      // Close the connection when fetch completes
+      res.write('data: {"type":"done"}\n\n');
+      res.end();
+    } else {
+      console.log('[SSE] Fetch already in progress, listening for updates...');
+      // Keep connection open - it will close when the fetch completes
+    }
   } catch (error) {
     logger.error('SSE fetch error', error);
     res.write(`data: ${JSON.stringify({ type: 'error', message: `${error}` })}\n\n`);
@@ -87,8 +99,8 @@ router.get('/fetch/incremental/stream', async (req: Request, res: Response) => {
 
   logger.info('SSE stream started for incremental fetch');
 
-  // Create a new DataFetcherService instance for this request
-  const fetcher = new DataFetcherService();
+  // Use the singleton instance
+  const fetcher = DataFetcherServiceInstance;
 
   // Set up progress listener
   const progressListener = (event: ProgressEvent) => {
@@ -101,13 +113,25 @@ router.get('/fetch/incremental/stream', async (req: Request, res: Response) => {
   // Send initial connection event
   res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
 
-  try {
-    // Start the fetch
-    await fetcher.fetchIncrementalData();
+  // If there's already progress, send it immediately
+  const currentProgress = fetcher.getCurrentProgress();
+  if (currentProgress) {
+    res.write(`data: ${JSON.stringify(currentProgress)}\n\n`);
+  }
 
-    // Close the connection
-    res.write('data: {"type":"done"}\n\n');
-    res.end();
+  // Handle client disconnect
+  req.on('close', () => {
+    fetcher.removeListener('progress', progressListener);
+  });
+
+  try {
+    // Only start a new fetch if none is in progress
+    if (!fetcher.isFetchInProgress()) {
+      await fetcher.fetchIncrementalData();
+      res.write('data: {"type":"done"}\n\n');
+      res.end();
+    }
+    // If fetch is already in progress, just listen for updates
   } catch (error) {
     logger.error('SSE incremental fetch error', error);
     res.write(`data: ${JSON.stringify({ type: 'error', message: `${error}` })}\n\n`);
@@ -125,8 +149,7 @@ router.post('/fetch', async (req: Request, res: Response) => {
   try {
     logger.info('Manual fetch triggered');
 
-    const fetcher = new DataFetcherService();
-    const result = await fetcher.fetchInitialData();
+    const result = await DataFetcherServiceInstance.fetchInitialData();
 
     res.json({
       success: true,
@@ -151,8 +174,7 @@ router.post('/fetch/incremental', async (req: Request, res: Response) => {
   try {
     logger.info('Manual incremental fetch triggered');
 
-    const fetcher = new DataFetcherService();
-    const result = await fetcher.fetchIncrementalData();
+    const result = await DataFetcherServiceInstance.fetchIncrementalData();
 
     res.json({
       success: true,
