@@ -33,12 +33,19 @@ router.get('/fetch/stream', async (req: Request, res: Response) => {
   // Use the singleton instance
   const fetcher = DataFetcherServiceInstance;
 
-  // Set up progress listener
+  // Set up progress listener that closes connection on completion
   const progressListener = (event: ProgressEvent) => {
     console.log(`[SSE] Received progress event: ${event.type}, ${event.processedAssets}/${event.totalAssets}`);
     logger.debug(`Progress event: ${event.type}, ${event.processedAssets}/${event.totalAssets}`);
     const written = res.write(`data: ${JSON.stringify(event)}\n\n`);
     console.log(`[SSE] Write returned: ${written}`);
+
+    // Close connection when fetch completes or errors
+    if (event.type === 'complete' || event.type === 'error') {
+      res.write('data: {"type":"done"}\n\n');
+      res.end();
+      fetcher.removeListener('progress', progressListener);
+    }
   };
 
   console.log('[SSE] Setting up progress listener...');
@@ -66,18 +73,15 @@ router.get('/fetch/stream', async (req: Request, res: Response) => {
     if (!fetcher.isFetchInProgress()) {
       console.log('[SSE] Starting new fetch...');
       await fetcher.fetchInitialData();
-      // Close the connection when fetch completes
-      res.write('data: {"type":"done"}\n\n');
-      res.end();
+      // Note: Connection will be closed by progressListener on complete event
     } else {
       console.log('[SSE] Fetch already in progress, listening for updates...');
-      // Keep connection open - it will close when the fetch completes
+      // Keep connection open - progressListener will close it on completion
     }
   } catch (error) {
     logger.error('SSE fetch error', error);
     res.write(`data: ${JSON.stringify({ type: 'error', message: `${error}` })}\n\n`);
     res.end();
-  } finally {
     fetcher.removeListener('progress', progressListener);
   }
 });
@@ -102,10 +106,17 @@ router.get('/fetch/incremental/stream', async (req: Request, res: Response) => {
   // Use the singleton instance
   const fetcher = DataFetcherServiceInstance;
 
-  // Set up progress listener
+  // Set up progress listener that closes connection on completion
   const progressListener = (event: ProgressEvent) => {
     logger.debug(`Incremental progress event: ${event.type}, ${event.processedAssets}/${event.totalAssets}`);
     res.write(`data: ${JSON.stringify(event)}\n\n`);
+
+    // Close connection when fetch completes or errors
+    if (event.type === 'complete' || event.type === 'error') {
+      res.write('data: {"type":"done"}\n\n');
+      res.end();
+      fetcher.removeListener('progress', progressListener);
+    }
   };
 
   fetcher.on('progress', progressListener);
@@ -128,15 +139,13 @@ router.get('/fetch/incremental/stream', async (req: Request, res: Response) => {
     // Only start a new fetch if none is in progress
     if (!fetcher.isFetchInProgress()) {
       await fetcher.fetchIncrementalData();
-      res.write('data: {"type":"done"}\n\n');
-      res.end();
+      // Note: Connection will be closed by progressListener on complete event
     }
-    // If fetch is already in progress, just listen for updates
+    // If fetch is already in progress, progressListener will close connection on completion
   } catch (error) {
     logger.error('SSE incremental fetch error', error);
     res.write(`data: ${JSON.stringify({ type: 'error', message: `${error}` })}\n\n`);
     res.end();
-  } finally {
     fetcher.removeListener('progress', progressListener);
   }
 });
