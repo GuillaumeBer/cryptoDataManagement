@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useFundingRates } from '../hooks/useApi';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { formatDate, formatPercentage } from '../utils/formatters';
@@ -11,19 +11,23 @@ interface FundingRateChartProps {
 export default function FundingRateChart({ asset, platform }: FundingRateChartProps) {
   const [dateRange, setDateRange] = useState<'7d' | '14d' | '30d' | 'all'>('7d');
 
-  // Calculate date range
-  const endDate = new Date();
-  const startDate = new Date();
+  // Calculate date range - memoize to prevent infinite re-renders
+  const { startDate, endDate } = useMemo(() => {
+    const end = new Date();
+    const start = new Date();
 
-  if (dateRange === '7d') {
-    startDate.setDate(startDate.getDate() - 7);
-  } else if (dateRange === '14d') {
-    startDate.setDate(startDate.getDate() - 14);
-  } else if (dateRange === '30d') {
-    startDate.setDate(startDate.getDate() - 30);
-  } else {
-    startDate.setFullYear(startDate.getFullYear() - 1); // All data (max 1 year back)
-  }
+    if (dateRange === '7d') {
+      start.setDate(start.getDate() - 7);
+    } else if (dateRange === '14d') {
+      start.setDate(start.getDate() - 14);
+    } else if (dateRange === '30d') {
+      start.setDate(start.getDate() - 30);
+    } else {
+      start.setFullYear(start.getFullYear() - 1); // All data (max 1 year back)
+    }
+
+    return { startDate: start, endDate: end };
+  }, [dateRange]);
 
   const { data, isLoading, error } = useFundingRates({
     asset,
