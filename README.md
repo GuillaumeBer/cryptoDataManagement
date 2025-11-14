@@ -38,6 +38,64 @@ This application solves the problem of limited historical data availability on c
 - **Data Fetching**: TanStack Query (React Query)
 - **Routing**: React Router
 
+## Quick Start (Recommended)
+
+The easiest way to run this project is using Docker for the database. You only need **Docker** and **Node.js** installed.
+
+### Automated Setup
+
+**macOS/Linux:**
+```bash
+./start.sh
+```
+
+**Windows:**
+```bash
+start.bat
+```
+
+This script will:
+1. Start PostgreSQL in Docker
+2. Install dependencies for backend and frontend
+3. Run database migrations
+4. Create environment files
+
+Then follow the on-screen instructions to start the backend and frontend.
+
+### Manual Docker Setup
+
+```bash
+# 1. Start PostgreSQL
+docker-compose up -d
+
+# 2. Setup and start backend
+cd backend
+npm install
+cp .env.example .env
+npm run db:migrate
+npm run dev        # Runs on http://localhost:3000
+
+# 3. In another terminal, setup and start frontend
+cd frontend
+npm install
+cp .env.example .env
+npm run dev        # Runs on http://localhost:5173
+```
+
+### First Use
+1. Open http://localhost:5173 in your browser
+2. Click **"Fetch Initial Data"** button
+3. Wait 1-2 minutes while it fetches all assets and funding rates
+4. Select an asset (e.g., BTC, ETH) to view charts and analytics
+
+### Stopping
+```bash
+# Stop the database
+docker-compose down
+
+# Stop backend/frontend with Ctrl+C in their terminals
+```
+
 ## Project Structure
 
 ```
@@ -74,11 +132,15 @@ cryptoDataManagement/
 
 ## Prerequisites
 
-Before you begin, ensure you have:
+### For Docker Setup (Recommended)
+- **Docker** and **Docker Compose** - [Install Docker](https://docs.docker.com/get-docker/)
+- **Node.js** 18.0.0 or higher - [Install Node.js](https://nodejs.org/)
+- **Git**
 
+### For Manual Setup (Without Docker)
 - **Node.js** 18.0.0 or higher
 - **npm** or **yarn** package manager
-- **PostgreSQL** 14 or higher
+- **PostgreSQL** 14 or higher (installed and running locally)
 - **Git**
 
 ## Getting Started
