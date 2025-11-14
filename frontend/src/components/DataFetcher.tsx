@@ -147,12 +147,15 @@ export default function DataFetcher() {
       try {
         const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
         const response = await fetch(`${apiUrl}/status`);
-        const status = await response.json();
+        const statusResponse = await response.json();
 
-        console.log('[FRONTEND] Status check:', status);
+        console.log('[FRONTEND] Status check:', statusResponse);
+
+        // Extract the actual status data from the API response wrapper
+        const status = statusResponse.data;
 
         // Reconnect to ongoing initial fetch
-        if (status.fetchInProgress?.isInitialFetchInProgress) {
+        if (status?.fetchInProgress?.isInitialFetchInProgress) {
           console.log('[FRONTEND] Detected ongoing initial fetch, reconnecting...');
           if (status.fetchInProgress.currentProgress) {
             setInitialProgress(status.fetchInProgress.currentProgress);
@@ -161,7 +164,7 @@ export default function DataFetcher() {
         }
 
         // Reconnect to ongoing incremental fetch
-        if (status.fetchInProgress?.isIncrementalFetchInProgress) {
+        if (status?.fetchInProgress?.isIncrementalFetchInProgress) {
           console.log('[FRONTEND] Detected ongoing incremental fetch, reconnecting...');
           if (status.fetchInProgress.currentProgress) {
             setIncrementalProgress(status.fetchInProgress.currentProgress);
