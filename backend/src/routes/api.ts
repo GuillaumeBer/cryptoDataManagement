@@ -30,11 +30,14 @@ router.get('/fetch/stream', async (req: Request, res: Response) => {
 
   // Set up progress listener
   const progressListener = (event: ProgressEvent) => {
+    console.log(`[SSE] Received progress event: ${event.type}, ${event.processedAssets}/${event.totalAssets}`);
     logger.debug(`Progress event: ${event.type}, ${event.processedAssets}/${event.totalAssets}`);
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   };
 
+  console.log('[SSE] Setting up progress listener...');
   fetcher.on('progress', progressListener);
+  console.log('[SSE] Progress listener attached. Starting fetch...');
 
   // Send initial connection event
   res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
