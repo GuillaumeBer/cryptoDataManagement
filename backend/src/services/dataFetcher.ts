@@ -204,7 +204,8 @@ export class DataFetcherService extends EventEmitter {
 
       return { assetsProcessed, recordsFetched, errors };
     } catch (error) {
-      logger.error('Initial data fetch failed', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      logger.error('Initial data fetch failed:', errorMsg);
 
       // Emit error event
       this.currentProgress = {
@@ -212,7 +213,7 @@ export class DataFetcherService extends EventEmitter {
         totalAssets: 0,
         processedAssets: assetsProcessed,
         recordsFetched,
-        errors: [...errors, `${error}`],
+        errors: [...errors, errorMsg],
         percentage: 0,
       };
       this.emit('progress', this.currentProgress);
@@ -222,9 +223,9 @@ export class DataFetcherService extends EventEmitter {
         'failed',
         assetsProcessed,
         recordsFetched,
-        `${error}`
+        errorMsg
       );
-      throw error;
+      throw new Error(errorMsg);
     } finally {
       // Always clear the in-progress flag and current progress
       this.isInitialFetchInProgress = false;
@@ -372,7 +373,8 @@ export class DataFetcherService extends EventEmitter {
 
       return { assetsProcessed, recordsFetched, errors };
     } catch (error) {
-      logger.error('Incremental data fetch failed', error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      logger.error('Incremental data fetch failed:', errorMsg);
 
       // Emit error event
       this.currentProgress = {
@@ -380,7 +382,7 @@ export class DataFetcherService extends EventEmitter {
         totalAssets: 0,
         processedAssets: assetsProcessed,
         recordsFetched,
-        errors: [...errors, `${error}`],
+        errors: [...errors, errorMsg],
         percentage: 0,
       };
       this.emit('progress', this.currentProgress);
@@ -390,9 +392,9 @@ export class DataFetcherService extends EventEmitter {
         'failed',
         assetsProcessed,
         recordsFetched,
-        `${error}`
+        errorMsg
       );
-      throw error;
+      throw new Error(errorMsg);
     } finally {
       // Always clear the in-progress flag and current progress
       this.isIncrementalFetchInProgress = false;
