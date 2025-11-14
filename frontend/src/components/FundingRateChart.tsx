@@ -33,10 +33,19 @@ export default function FundingRateChart({ asset, platform }: FundingRateChartPr
     limit: 1000,
   });
 
+  // Debug logging
+  console.log('[CHART] Query state:', { isLoading, hasError: !!error, hasData: !!data, dataLength: data?.length });
+  if (error) {
+    console.error('[CHART] Error:', error);
+  }
+
   if (isLoading) {
     return (
       <div className="bg-white rounded-lg shadow p-6">
-        <p className="text-sm text-gray-500">Loading chart data...</p>
+        <p className="text-sm text-gray-500">Loading chart data for {asset}...</p>
+        <p className="text-xs text-gray-400 mt-2">
+          Fetching from: {dateRange !== 'all' ? startDate.toISOString().split('T')[0] : 'beginning'}
+        </p>
       </div>
     );
   }
@@ -45,6 +54,11 @@ export default function FundingRateChart({ asset, platform }: FundingRateChartPr
     return (
       <div className="bg-white rounded-lg shadow p-6">
         <p className="text-sm text-red-600">Failed to load chart data</p>
+        {error && (
+          <p className="text-xs text-red-500 mt-2">
+            Error: {error instanceof Error ? error.message : String(error)}
+          </p>
+        )}
       </div>
     );
   }

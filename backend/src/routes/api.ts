@@ -270,6 +270,8 @@ router.get('/funding-rates', async (req: Request, res: Response) => {
   try {
     const { asset, startDate, endDate, platform, limit, offset } = req.query;
 
+    console.log('[API] Funding rates request:', { asset, startDate, endDate, platform, limit, offset });
+
     const query: any = {
       asset: asset as string,
       platform: platform as string,
@@ -285,7 +287,9 @@ router.get('/funding-rates', async (req: Request, res: Response) => {
       query.endDate = new Date(endDate as string);
     }
 
+    console.log('[API] Querying funding rates with:', query);
     const fundingRates = await FundingRateRepository.find(query);
+    console.log('[API] Found', fundingRates.length, 'funding rates for', asset);
 
     res.json({
       success: true,
