@@ -19,6 +19,11 @@ router.get('/fetch/stream', async (req: Request, res: Response) => {
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('X-Accel-Buffering', 'no'); // Disable buffering for nginx
+  res.setHeader('Transfer-Encoding', 'chunked');
+
+  // Disable socket buffering
+  req.socket.setNoDelay(true);
+  req.socket.setTimeout(0);
 
   // Flush headers to establish SSE connection
   res.flushHeaders();
@@ -32,7 +37,14 @@ router.get('/fetch/stream', async (req: Request, res: Response) => {
   const progressListener = (event: ProgressEvent) => {
     console.log(`[SSE] Received progress event: ${event.type}, ${event.processedAssets}/${event.totalAssets}`);
     logger.debug(`Progress event: ${event.type}, ${event.processedAssets}/${event.totalAssets}`);
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
+    const written = res.write(`data: ${JSON.stringify(event)}\n\n`);
+    console.log(`[SSE] Write returned: ${written}`);
+    // Force flush by calling flushHeaders (no-op if already flushed) or checking drain
+    if (!written) {
+      res.once('drain', () => {
+        console.log('[SSE] Drain event fired');
+      });
+    }
   };
 
   console.log('[SSE] Setting up progress listener...');
