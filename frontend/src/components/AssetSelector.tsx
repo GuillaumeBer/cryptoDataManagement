@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Asset } from '../types';
 
 interface AssetSelectorProps {
@@ -11,6 +12,12 @@ export default function AssetSelector({
   selectedAsset,
   onSelectAsset,
 }: AssetSelectorProps) {
+  const [searchTerm, setSearchTerm] = useState('');
+
+  // Filter assets based on search term
+  const filteredAssets = assets.filter((asset) =>
+    asset.symbol.toLowerCase().includes(searchTerm.toLowerCase())
+  );
   return (
     <div className="bg-white rounded-lg shadow p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-4">Select Asset</h2>
@@ -27,20 +34,26 @@ export default function AssetSelector({
             <input
               type="text"
               placeholder="Search assets..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              onChange={(e) => {
-                // Simple search filter
-                const searchTerm = e.target.value.toLowerCase();
-                const filtered = assets.filter((a) =>
-                  a.symbol.toLowerCase().includes(searchTerm)
-                );
-                // Could implement search filtering here
-              }}
             />
+            {searchTerm && (
+              <p className="text-xs text-gray-500 mt-1">
+                Showing {filteredAssets.length} of {assets.length} assets
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 max-h-96 overflow-y-auto">
-            {assets.map((asset) => {
+            {filteredAssets.length === 0 ? (
+              <div className="col-span-full text-center py-8">
+                <p className="text-sm text-gray-500">
+                  No assets match "{searchTerm}"
+                </p>
+              </div>
+            ) : (
+              filteredAssets.map((asset) => {
               // Determine staleness badge color
               const getStalenessColor = (days?: number) => {
                 if (!days || days === 999) return null; // No data
@@ -75,7 +88,8 @@ export default function AssetSelector({
                   )}
                 </button>
               );
-            })}
+            })
+            )}
           </div>
         </div>
       )}
