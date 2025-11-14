@@ -56,6 +56,7 @@ export class DataFetcherService extends EventEmitter {
       logger.info(`Stored ${assets.length} assets in database`);
 
       // Emit start event
+      console.log(`[PROGRESS] START: 0/${assets.length} assets`);
       this.emit('progress', {
         type: 'start',
         totalAssets: assets.length,
@@ -72,6 +73,7 @@ export class DataFetcherService extends EventEmitter {
         2500, // 2.5s delay - Rate limit: 1200 weight/min, fundingHistory costs ~44 weight (20 base + ~24 for 480 items)
         (currentSymbol: string, processed: number) => {
           // Emit progress event for each asset
+          console.log(`[PROGRESS] ${processed}/${assets.length} - Current: ${currentSymbol} (${Math.round((processed / assets.length) * 100)}%)`);
           this.emit('progress', {
             type: 'progress',
             totalAssets: assets.length,
@@ -128,6 +130,7 @@ export class DataFetcherService extends EventEmitter {
       );
 
       // Emit completion event
+      console.log(`[PROGRESS] COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} records fetched`);
       this.emit('progress', {
         type: 'complete',
         totalAssets: assets.length,

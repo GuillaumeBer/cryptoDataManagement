@@ -104,8 +104,10 @@ export class HyperliquidClient {
     let processed = 0;
     for (const coin of coins) {
       try {
+        console.log(`[API] Fetching ${coin}...`);
         const data = await this.getFundingHistory(coin);
         results.set(coin, data);
+        console.log(`[API] ✓ ${coin}: ${data.length} records`);
 
         processed++;
         // Emit progress callback
@@ -118,6 +120,7 @@ export class HyperliquidClient {
           await this.sleep(delayMs);
         }
       } catch (error) {
+        console.log(`[API] ✗ ${coin}: FAILED`);
         logger.error(`Failed to fetch funding history for ${coin}`, error);
         results.set(coin, []);
         processed++;
