@@ -11,7 +11,11 @@ interface ProgressEvent {
   percentage: number;
 }
 
-export default function DataFetcher() {
+interface DataFetcherProps {
+  platform: string;
+}
+
+export default function DataFetcher({ platform }: DataFetcherProps) {
   const queryClient = useQueryClient();
   const [initialProgress, setInitialProgress] = useState<ProgressEvent | null>(null);
   const [incrementalProgress, setIncrementalProgress] = useState<ProgressEvent | null>(null);
