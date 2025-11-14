@@ -76,9 +76,10 @@ export class HyperliquidClient {
 
       logger.debug(`Fetched ${results.length} funding rate records for ${coin}`);
       return results;
-    } catch (error) {
-      logger.error(`Failed to fetch funding history for ${coin}`, error);
-      throw new Error(`Failed to fetch funding history for ${coin}: ${error}`);
+    } catch (error: any) {
+      console.error(`Failed to fetch funding history for ${coin}:`, error.message || error);
+      logger.error(`Failed to fetch funding history for ${coin}: ${error.message || error}`);
+      throw new Error(`Failed to fetch funding history for ${coin}: ${error.message || error}`);
     }
   }
 
