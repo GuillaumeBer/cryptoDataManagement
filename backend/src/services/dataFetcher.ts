@@ -47,7 +47,7 @@ export class DataFetcherService {
       const assetSymbols = assets.map((a) => a.name);
       const fundingDataMap = await this.hyperliquidClient.getFundingHistoryBatch(
         assetSymbols,
-        1000 // 1000ms (1 second) delay between requests to avoid rate limiting
+        2500 // 2.5s delay - Rate limit: 1200 weight/min, fundingHistory costs ~44 weight (20 base + ~24 for 480 items)
       );
 
       // Step 3: Store funding rate data
@@ -136,7 +136,7 @@ export class DataFetcherService {
       const assetSymbols = assets.map((a) => a.symbol);
       const fundingDataMap = await this.hyperliquidClient.getFundingHistoryBatch(
         assetSymbols,
-        1000
+        2500 // 2.5s delay to respect Hyperliquid rate limits
       );
 
       // Store only new records
