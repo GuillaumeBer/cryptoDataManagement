@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import {
   LighterAsset,
@@ -25,6 +25,19 @@ export class LighterClient {
   }
 
   /**
+   * Safely extract error message from axios error
+   */
+  private getErrorMessage(error: unknown): string {
+    if (axios.isAxiosError(error)) {
+      const axiosError = error as AxiosError;
+      return axiosError.response?.data
+        ? `${axiosError.message}: ${JSON.stringify(axiosError.response.data).substring(0, 200)}`
+        : axiosError.message;
+    }
+    return String(error);
+  }
+
+  /**
    * Fetch all available perpetual futures assets from Lighter
    */
   async getAssets(): Promise<LighterAsset[]> {
@@ -42,8 +55,9 @@ export class LighterClient {
       logger.info(`Fetched ${assets.length} assets from Lighter`);
       return assets;
     } catch (error) {
-      logger.error('Failed to fetch assets from Lighter', error);
-      throw new Error(`Failed to fetch assets: ${error}`);
+      const errorMsg = this.getErrorMessage(error);
+      logger.error('Failed to fetch assets from Lighter', errorMsg);
+      throw new Error(`Failed to fetch assets: ${errorMsg}`);
     }
   }
 
@@ -85,10 +99,10 @@ export class LighterClient {
       logger.debug(`Fetched ${results.length} funding rate records for ${symbol}`);
       return results;
     } catch (error: any) {
-      const errorDetails = error.response?.data ? JSON.stringify(error.response.data) : error.message;
-      console.error(`Failed to fetch funding history for ${symbol}:`, errorDetails);
-      logger.error(`Failed to fetch funding history for ${symbol}: ${errorDetails}`);
-      throw new Error(`Failed to fetch funding history for ${symbol}: ${errorDetails}`);
+      const errorMsg = this.getErrorMessage(error);
+      console.error(`Failed to fetch funding history for ${symbol}:`, errorMsg);
+      logger.error(`Failed to fetch funding history for ${symbol}: ${errorMsg}`);
+      throw new Error(`Failed to fetch funding history for ${symbol}: ${errorMsg}`);
     }
   }
 

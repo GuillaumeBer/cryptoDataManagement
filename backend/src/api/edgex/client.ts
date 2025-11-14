@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import {
   EdgeXAsset,
@@ -25,6 +25,19 @@ export class EdgeXClient {
   }
 
   /**
+   * Safely extract error message from axios error
+   */
+  private getErrorMessage(error: unknown): string {
+    if (axios.isAxiosError(error)) {
+      const axiosError = error as AxiosError;
+      return axiosError.response?.data
+        ? `${axiosError.message}: ${JSON.stringify(axiosError.response.data).substring(0, 200)}`
+        : axiosError.message;
+    }
+    return String(error);
+  }
+
+  /**
    * Fetch all available perpetual futures assets from EdgeX
    */
   async getAssets(): Promise<EdgeXAsset[]> {
@@ -42,8 +55,9 @@ export class EdgeXClient {
       logger.info(`Fetched ${assets.length} assets from EdgeX`);
       return assets;
     } catch (error) {
-      logger.error('Failed to fetch assets from EdgeX', error);
-      throw new Error(`Failed to fetch assets: ${error}`);
+      const errorMsg = this.getErrorMessage(error);
+      logger.error('Failed to fetch assets from EdgeX', errorMsg);
+      throw new Error(`Failed to fetch assets: ${errorMsg}`);
     }
   }
 
@@ -86,10 +100,10 @@ export class EdgeXClient {
       logger.debug(`Fetched ${results.length} funding rate records for ${symbol}`);
       return results;
     } catch (error: any) {
-      const errorDetails = error.response?.data ? JSON.stringify(error.response.data) : error.message;
-      console.error(`Failed to fetch funding history for ${symbol}:`, errorDetails);
-      logger.error(`Failed to fetch funding history for ${symbol}: ${errorDetails}`);
-      throw new Error(`Failed to fetch funding history for ${symbol}: ${errorDetails}`);
+      const errorMsg = this.getErrorMessage(error);
+      console.error(`Failed to fetch funding history for ${symbol}:`, errorMsg);
+      logger.error(`Failed to fetch funding history for ${symbol}: ${errorMsg}`);
+      throw new Error(`Failed to fetch funding history for ${symbol}: ${errorMsg}`);
     }
   }
 
@@ -124,8 +138,9 @@ export class EdgeXClient {
           await this.sleep(delayMs);
         }
       } catch (error) {
-        console.log(`[API] ✗ ${symbol}: FAILED`);
-        logger.error(`Failed to fetch funding history for ${symbol}`, error);
+        const errorMsg = this.getErrorMessage(error);
+        console.log(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+        logger.error(`Failed to fetch funding history for ${symbol}`, errorMsg);
         results.set(symbol, []);
         processed++;
         if (onProgress) {
