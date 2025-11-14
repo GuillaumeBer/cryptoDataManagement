@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import DataFetcherServiceInstance from '../services/dataFetcher';
 import { DataFetcherService, ProgressEvent } from '../services/dataFetcher';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
@@ -143,7 +144,7 @@ router.post('/fetch/incremental', async (req: Request, res: Response) => {
  */
 router.get('/status', async (req: Request, res: Response) => {
   try {
-    const status = await DataFetcherService.getStatus();
+    const status = await DataFetcherServiceInstance.getStatus();
 
     res.json({
       success: true,
