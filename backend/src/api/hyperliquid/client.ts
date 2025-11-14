@@ -50,18 +50,23 @@ export class HyperliquidClient {
 
   /**
    * Fetch funding rate history for a specific asset
-   * Returns last 480 hours of data
+   * Returns last 480 hours of data (max supported by Hyperliquid is 500 hours)
    */
   async getFundingHistory(coin: string): Promise<FetchedFundingData[]> {
     try {
       logger.debug(`Fetching funding history for ${coin}`);
 
+      // Calculate startTime: 480 hours ago in milliseconds
+      const hoursAgo = 480;
+      const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
+
       const response = await this.client.post<HyperliquidFundingHistoryResponse>('/info', {
         type: 'fundingHistory',
         coin,
+        startTime,
       });
 
-      const fundingData = response.data[coin];
+      const fundingData = response.data;
       if (!fundingData || !Array.isArray(fundingData)) {
         logger.warn(`No funding data found for ${coin}`);
         return [];
@@ -77,9 +82,10 @@ export class HyperliquidClient {
       logger.debug(`Fetched ${results.length} funding rate records for ${coin}`);
       return results;
     } catch (error: any) {
-      console.error(`Failed to fetch funding history for ${coin}:`, error.message || error);
-      logger.error(`Failed to fetch funding history for ${coin}: ${error.message || error}`);
-      throw new Error(`Failed to fetch funding history for ${coin}: ${error.message || error}`);
+      const errorDetails = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+      console.error(`Failed to fetch funding history for ${coin}:`, errorDetails);
+      logger.error(`Failed to fetch funding history for ${coin}: ${errorDetails}`);
+      throw new Error(`Failed to fetch funding history for ${coin}: ${errorDetails}`);
     }
   }
 

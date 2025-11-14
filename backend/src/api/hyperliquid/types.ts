@@ -16,9 +16,8 @@ export interface HyperliquidFundingPoint {
   premium: string; // Decimal string
 }
 
-export interface HyperliquidFundingHistoryResponse {
-  [assetName: string]: HyperliquidFundingPoint[];
-}
+// Response is an array of funding points for the requested coin
+export type HyperliquidFundingHistoryResponse = HyperliquidFundingPoint[];
 
 export interface HyperliquidAsset {
   name: string;
