@@ -233,11 +233,37 @@ export class DataFetcherService extends EventEmitter {
         return { assetsProcessed: 0, recordsFetched: 0, errors: ['No assets found'] };
       }
 
+      // Emit start event
+      console.log(`[PROGRESS] INCREMENTAL START: 0/${assets.length} assets`);
+      this.currentProgress = {
+        type: 'start',
+        totalAssets: assets.length,
+        processedAssets: 0,
+        recordsFetched: 0,
+        errors: [],
+        percentage: 0,
+      };
+      this.emit('progress', this.currentProgress);
+
       // Fetch funding history for each asset
       const assetSymbols = assets.map((a) => a.symbol);
       const fundingDataMap = await this.hyperliquidClient.getFundingHistoryBatch(
         assetSymbols,
-        2500 // 2.5s delay to respect Hyperliquid rate limits
+        2500, // 2.5s delay to respect Hyperliquid rate limits
+        (currentSymbol: string, processed: number) => {
+          // Emit progress event for each asset
+          console.log(`[PROGRESS] INCREMENTAL ${processed}/${assets.length} - Current: ${currentSymbol} (${Math.round((processed / assets.length) * 100)}%)`);
+          this.currentProgress = {
+            type: 'progress',
+            totalAssets: assets.length,
+            processedAssets: processed,
+            currentAsset: currentSymbol,
+            recordsFetched,
+            errors,
+            percentage: Math.round((processed / assets.length) * 100),
+          };
+          this.emit('progress', this.currentProgress);
+        }
       );
 
       // Store only new records
@@ -299,9 +325,33 @@ export class DataFetcherService extends EventEmitter {
         `Incremental fetch completed: ${assetsProcessed} assets, ${recordsFetched} new records, ${errors.length} errors`
       );
 
+      // Emit completion event
+      console.log(`[PROGRESS] INCREMENTAL COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} new records fetched`);
+      this.currentProgress = {
+        type: 'complete',
+        totalAssets: assets.length,
+        processedAssets: assetsProcessed,
+        recordsFetched,
+        errors,
+        percentage: 100,
+      };
+      this.emit('progress', this.currentProgress);
+
       return { assetsProcessed, recordsFetched, errors };
     } catch (error) {
       logger.error('Incremental data fetch failed', error);
+
+      // Emit error event
+      this.currentProgress = {
+        type: 'error',
+        totalAssets: 0,
+        processedAssets: assetsProcessed,
+        recordsFetched,
+        errors: [...errors, `${error}`],
+        percentage: 0,
+      };
+      this.emit('progress', this.currentProgress);
+
       await FetchLogRepository.complete(
         fetchLog.id,
         'failed',
