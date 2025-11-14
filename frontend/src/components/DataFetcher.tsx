@@ -41,14 +41,22 @@ export default function DataFetcher() {
     setInitialProgress(null);
 
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+    console.log('[FRONTEND] Opening EventSource:', `${apiUrl}/fetch/stream`);
     const eventSource = new EventSource(`${apiUrl}/fetch/stream`);
     initialEventSourceRef.current = eventSource;
 
+    eventSource.onopen = () => {
+      console.log('[FRONTEND] EventSource connection opened');
+    };
+
     eventSource.onmessage = (event) => {
+      console.log('[FRONTEND] Received message:', event.data);
       const data = JSON.parse(event.data);
+      console.log('[FRONTEND] Parsed data:', data);
 
       // Ignore connection confirmation events
       if (data.type === 'connected' || data.type === 'done') {
+        console.log('[FRONTEND] Ignoring event type:', data.type);
         if (data.type === 'done') {
           eventSource.close();
           setInitialFetching(false);
@@ -58,6 +66,7 @@ export default function DataFetcher() {
         return;
       }
 
+      console.log('[FRONTEND] Setting progress:', data);
       setInitialProgress(data as ProgressEvent);
 
       if (data.type === 'complete' || data.type === 'error') {
