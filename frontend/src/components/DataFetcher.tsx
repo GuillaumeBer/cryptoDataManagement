@@ -224,7 +224,7 @@ export default function DataFetcher() {
           </p>
           <button
             onClick={handleInitialFetch}
-            disabled={initialFetching}
+            disabled={initialFetching || incrementalFetching}
             className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             {initialFetching ? 'Fetching...' : 'Fetch Initial Data'}
@@ -241,7 +241,7 @@ export default function DataFetcher() {
           </p>
           <button
             onClick={handleIncrementalFetch}
-            disabled={incrementalFetching}
+            disabled={initialFetching || incrementalFetching}
             className="w-full bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             {incrementalFetching ? 'Updating...' : 'Update Data'}
