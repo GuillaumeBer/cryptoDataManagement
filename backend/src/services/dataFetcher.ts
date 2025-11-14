@@ -1,10 +1,16 @@
 import { EventEmitter } from 'events';
 import HyperliquidClient from '../api/hyperliquid/client';
+import LighterClient from '../api/lighter/client';
+import AsterClient from '../api/aster/client';
+import EdgeXClient from '../api/edgex/client';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
 import { CreateFundingRateParams } from '../models/types';
 import { logger } from '../utils/logger';
+
+// Union type for all platform clients
+type PlatformClient = HyperliquidClient | LighterClient | AsterClient | EdgeXClient;
 
 export interface ProgressEvent {
   type: 'start' | 'progress' | 'complete' | 'error';
@@ -17,15 +23,37 @@ export interface ProgressEvent {
 }
 
 export class DataFetcherService extends EventEmitter {
-  private hyperliquidClient: HyperliquidClient;
-  private platform = 'hyperliquid';
+  private platformClient: PlatformClient;
+  private platform: string;
   private isInitialFetchInProgress = false;
   private isIncrementalFetchInProgress = false;
   private currentProgress: ProgressEvent | null = null;
 
-  constructor() {
+  constructor(platform: string = 'hyperliquid') {
     super();
-    this.hyperliquidClient = new HyperliquidClient();
+    this.platform = platform.toLowerCase();
+
+    // Initialize the correct client based on platform
+    switch (this.platform) {
+      case 'hyperliquid':
+        this.platformClient = new HyperliquidClient();
+        break;
+      case 'lighter':
+        this.platformClient = new LighterClient();
+        break;
+      case 'aster':
+        this.platformClient = new AsterClient();
+        break;
+      case 'edgex':
+        this.platformClient = new EdgeXClient();
+        break;
+      default:
+        logger.warn(`Unsupported platform: ${platform}, defaulting to Hyperliquid`);
+        this.platform = 'hyperliquid';
+        this.platformClient = new HyperliquidClient();
+    }
+
+    logger.info(`DataFetcherService initialized for platform: ${this.platform}`);
   }
 
   /**
@@ -68,15 +96,20 @@ export class DataFetcherService extends EventEmitter {
 
     try {
       // Step 1: Fetch and store all assets
-      logger.info('Fetching assets from Hyperliquid');
-      const assets = await this.hyperliquidClient.getAssets();
+      logger.info(`Fetching assets from ${this.platform}`);
+      const assets = await this.platformClient.getAssets();
 
+      // Normalize asset data across platforms
       await AssetRepository.bulkUpsert(
-        assets.map((a) => ({
-          symbol: a.name,
-          platform: this.platform,
-          name: a.name,
-        }))
+        assets.map((a: any) => {
+          // Handle different property names across platforms
+          const symbol = a.name || a.symbol;
+          return {
+            symbol,
+            platform: this.platform,
+            name: symbol,
+          };
+        })
       );
 
       logger.info(`Stored ${assets.length} assets in database`);
@@ -94,8 +127,8 @@ export class DataFetcherService extends EventEmitter {
       this.emit('progress', this.currentProgress);
 
       // Step 2: Fetch funding history for each asset
-      const assetSymbols = assets.map((a) => a.name);
-      const fundingDataMap = await this.hyperliquidClient.getFundingHistoryBatch(
+      const assetSymbols = assets.map((a: any) => a.name || a.symbol);
+      const fundingDataMap = await this.platformClient.getFundingHistoryBatch(
         assetSymbols,
         2500, // 2.5s delay - Rate limit: 1200 weight/min, fundingHistory costs ~44 weight (20 base + ~24 for 480 items)
         (currentSymbol: string, processed: number) => {
@@ -247,7 +280,7 @@ export class DataFetcherService extends EventEmitter {
 
       // Fetch funding history for each asset
       const assetSymbols = assets.map((a) => a.symbol);
-      const fundingDataMap = await this.hyperliquidClient.getFundingHistoryBatch(
+      const fundingDataMap = await this.platformClient.getFundingHistoryBatch(
         assetSymbols,
         2500, // 2.5s delay to respect Hyperliquid rate limits
         (currentSymbol: string, processed: number) => {
@@ -395,5 +428,3 @@ export class DataFetcherService extends EventEmitter {
     };
   }
 }
-
-export default new DataFetcherService();

@@ -1,9 +1,12 @@
 import { Router, Request, Response } from 'express';
-import DataFetcherServiceInstance from '../services/dataFetcher';
-import { DataFetcherService, ProgressEvent } from '../services/dataFetcher';
+import { ProgressEvent } from '../services/dataFetcher';
+import dataFetcherManager from '../services/dataFetcherManager';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
+import UnifiedAssetRepository from '../models/UnifiedAssetRepository';
+import AssetMappingRepository from '../models/AssetMappingRepository';
+import assetMappingService from '../services/assetMappingService';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -13,6 +16,9 @@ const router = Router();
  * Server-Sent Events endpoint for initial data fetch with real-time progress
  */
 router.get('/fetch/stream', async (req: Request, res: Response) => {
+  // Get platform from query parameter (default to hyperliquid)
+  const platform = (req.query.platform as string) || 'hyperliquid';
+
   // Set headers for SSE
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -28,10 +34,10 @@ router.get('/fetch/stream', async (req: Request, res: Response) => {
   // Flush headers to establish SSE connection
   res.flushHeaders();
 
-  logger.info('SSE stream started for initial fetch');
+  logger.info(`SSE stream started for initial fetch on platform: ${platform}`);
 
-  // Use the singleton instance
-  const fetcher = DataFetcherServiceInstance;
+  // Get the platform-specific fetcher
+  const fetcher = dataFetcherManager.getFetcher(platform);
 
   // Set up progress listener that closes connection on completion
   const progressListener = (event: ProgressEvent) => {
@@ -91,6 +97,9 @@ router.get('/fetch/stream', async (req: Request, res: Response) => {
  * Server-Sent Events endpoint for incremental fetch with real-time progress
  */
 router.get('/fetch/incremental/stream', async (req: Request, res: Response) => {
+  // Get platform from query parameter (default to hyperliquid)
+  const platform = (req.query.platform as string) || 'hyperliquid';
+
   // Set headers for SSE
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -101,10 +110,10 @@ router.get('/fetch/incremental/stream', async (req: Request, res: Response) => {
   // Flush headers to establish SSE connection
   res.flushHeaders();
 
-  logger.info('SSE stream started for incremental fetch');
+  logger.info(`SSE stream started for incremental fetch on platform: ${platform}`);
 
-  // Use the singleton instance
-  const fetcher = DataFetcherServiceInstance;
+  // Get the platform-specific fetcher
+  const fetcher = dataFetcherManager.getFetcher(platform);
 
   // Set up progress listener that closes connection on completion
   const progressListener = (event: ProgressEvent) => {
@@ -156,9 +165,11 @@ router.get('/fetch/incremental/stream', async (req: Request, res: Response) => {
  */
 router.post('/fetch', async (req: Request, res: Response) => {
   try {
-    logger.info('Manual fetch triggered');
+    const platform = (req.query.platform as string) || (req.body.platform as string) || 'hyperliquid';
+    logger.info(`Manual fetch triggered for platform: ${platform}`);
 
-    const result = await DataFetcherServiceInstance.fetchInitialData();
+    const fetcher = dataFetcherManager.getFetcher(platform);
+    const result = await fetcher.fetchInitialData();
 
     res.json({
       success: true,
@@ -181,9 +192,11 @@ router.post('/fetch', async (req: Request, res: Response) => {
  */
 router.post('/fetch/incremental', async (req: Request, res: Response) => {
   try {
-    logger.info('Manual incremental fetch triggered');
+    const platform = (req.query.platform as string) || (req.body.platform as string) || 'hyperliquid';
+    logger.info(`Manual incremental fetch triggered for platform: ${platform}`);
 
-    const result = await DataFetcherServiceInstance.fetchIncrementalData();
+    const fetcher = dataFetcherManager.getFetcher(platform);
+    const result = await fetcher.fetchIncrementalData();
 
     res.json({
       success: true,
@@ -206,7 +219,9 @@ router.post('/fetch/incremental', async (req: Request, res: Response) => {
  */
 router.get('/status', async (req: Request, res: Response) => {
   try {
-    const status = await DataFetcherServiceInstance.getStatus();
+    const platform = (req.query.platform as string) || 'hyperliquid';
+    const fetcher = dataFetcherManager.getFetcher(platform);
+    const status = await fetcher.getStatus();
 
     res.json({
       success: true,
@@ -384,6 +399,115 @@ router.get('/health', (req: Request, res: Response) => {
     status: 'healthy',
     timestamp: new Date().toISOString(),
   });
+});
+
+/**
+ * GET /api/unified-assets
+ * Get all unified assets with their platform mappings
+ */
+router.get('/unified-assets', async (req: Request, res: Response) => {
+  try {
+    const unifiedAssets = await UnifiedAssetRepository.findAllWithMappings();
+
+    res.json({
+      success: true,
+      data: unifiedAssets,
+      count: unifiedAssets.length,
+    });
+  } catch (error) {
+    logger.error('Unified assets endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch unified assets',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
+ * GET /api/unified-assets/:id
+ * Get a specific unified asset with its mappings
+ */
+router.get('/unified-assets/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const unifiedAsset = await UnifiedAssetRepository.findWithMappings(parseInt(id));
+
+    if (!unifiedAsset) {
+      return res.status(404).json({
+        success: false,
+        message: `Unified asset ${id} not found`,
+      });
+    }
+
+    res.json({
+      success: true,
+      data: unifiedAsset,
+    });
+  } catch (error) {
+    logger.error('Unified asset endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch unified asset',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
+ * POST /api/unified-assets/generate-mappings
+ * Generate asset mappings across all platforms
+ */
+router.post('/unified-assets/generate-mappings', async (req: Request, res: Response) => {
+  try {
+    logger.info('Generating asset mappings');
+
+    const result = await assetMappingService.generateMappings();
+
+    res.json({
+      success: true,
+      message: 'Asset mappings generated',
+      data: result,
+    });
+  } catch (error) {
+    logger.error('Generate mappings endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate mappings',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
+ * POST /api/unified-assets/manual-mapping
+ * Manually create a mapping between an asset and a unified asset
+ */
+router.post('/unified-assets/manual-mapping', async (req: Request, res: Response) => {
+  try {
+    const { assetId, normalizedSymbol } = req.body;
+
+    if (!assetId || !normalizedSymbol) {
+      return res.status(400).json({
+        success: false,
+        message: 'assetId and normalizedSymbol are required',
+      });
+    }
+
+    const result = await assetMappingService.createManualMapping(assetId, normalizedSymbol);
+
+    res.json({
+      success: result,
+      message: result ? 'Manual mapping created' : 'Failed to create manual mapping',
+    });
+  } catch (error) {
+    logger.error('Manual mapping endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create manual mapping',
+      error: `${error}`,
+    });
+  }
 });
 
 export default router;

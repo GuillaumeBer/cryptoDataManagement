@@ -33,8 +33,8 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
     setInitialFetching(true);
 
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-    console.log('[FRONTEND] Opening EventSource:', `${apiUrl}/fetch/stream`);
-    const eventSource = new EventSource(`${apiUrl}/fetch/stream`);
+    console.log('[FRONTEND] Opening EventSource:', `${apiUrl}/fetch/stream?platform=${platform}`);
+    const eventSource = new EventSource(`${apiUrl}/fetch/stream?platform=${platform}`);
     initialEventSourceRef.current = eventSource;
 
     eventSource.onopen = () => {
@@ -98,7 +98,7 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
     setIncrementalFetching(true);
 
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-    const eventSource = new EventSource(`${apiUrl}/fetch/incremental/stream`);
+    const eventSource = new EventSource(`${apiUrl}/fetch/incremental/stream?platform=${platform}`);
     incrementalEventSourceRef.current = eventSource;
 
     eventSource.onmessage = (event) => {
@@ -150,7 +150,7 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
     const checkOngoingFetch = async () => {
       try {
         const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-        const response = await fetch(`${apiUrl}/status`);
+        const response = await fetch(`${apiUrl}/status?platform=${platform}`);
         const statusResponse = await response.json();
 
         console.log('[FRONTEND] Status check:', statusResponse);
@@ -181,7 +181,7 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
     };
 
     checkOngoingFetch();
-  }, []); // Only run on mount
+  }, [platform]); // Run on mount and when platform changes
 
   // Cleanup event sources on unmount
   useEffect(() => {

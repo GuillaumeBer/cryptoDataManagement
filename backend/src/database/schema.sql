@@ -45,3 +45,32 @@ CREATE TABLE IF NOT EXISTS fetch_logs (
 
 CREATE INDEX IF NOT EXISTS idx_fetch_logs_platform ON fetch_logs(platform);
 CREATE INDEX IF NOT EXISTS idx_fetch_logs_started_at ON fetch_logs(started_at DESC);
+
+-- Unified assets table: represents a single asset across all platforms
+CREATE TABLE IF NOT EXISTS unified_assets (
+  id SERIAL PRIMARY KEY,
+  normalized_symbol VARCHAR(50) UNIQUE NOT NULL,
+  display_name VARCHAR(255),
+  description TEXT,
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Asset mappings table: links platform-specific assets to unified assets
+CREATE TABLE IF NOT EXISTS asset_mappings (
+  id SERIAL PRIMARY KEY,
+  unified_asset_id INTEGER NOT NULL REFERENCES unified_assets(id) ON DELETE CASCADE,
+  asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+  confidence_score INTEGER DEFAULT 100 CHECK (confidence_score >= 0 AND confidence_score <= 100),
+  mapping_method VARCHAR(50) NOT NULL, -- 'auto_symbol', 'auto_price', 'manual'
+  price_used DECIMAL(20, 10), -- Mark price used for validation (if applicable)
+  created_at TIMESTAMP DEFAULT NOW(),
+  updated_at TIMESTAMP DEFAULT NOW(),
+  CONSTRAINT unique_asset_mapping UNIQUE(unified_asset_id, asset_id)
+);
+
+-- Indexes for unified assets
+CREATE INDEX IF NOT EXISTS idx_unified_assets_normalized_symbol ON unified_assets(normalized_symbol);
+CREATE INDEX IF NOT EXISTS idx_asset_mappings_unified_asset_id ON asset_mappings(unified_asset_id);
+CREATE INDEX IF NOT EXISTS idx_asset_mappings_asset_id ON asset_mappings(asset_id);
+CREATE INDEX IF NOT EXISTS idx_asset_mappings_confidence ON asset_mappings(confidence_score DESC);

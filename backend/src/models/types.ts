@@ -73,3 +73,45 @@ export interface AssetAnalytics {
   positive_count: number;
   negative_count: number;
 }
+
+// Unified Assets types
+export interface UnifiedAsset {
+  id: number;
+  normalized_symbol: string;
+  display_name: string | null;
+  description: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface AssetMapping {
+  id: number;
+  unified_asset_id: number;
+  asset_id: number;
+  confidence_score: number;
+  mapping_method: 'auto_symbol' | 'auto_price' | 'manual';
+  price_used: string | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export interface CreateUnifiedAssetParams {
+  normalized_symbol: string;
+  display_name?: string;
+  description?: string;
+}
+
+export interface CreateAssetMappingParams {
+  unified_asset_id: number;
+  asset_id: number;
+  confidence_score?: number;
+  mapping_method: 'auto_symbol' | 'auto_price' | 'manual';
+  price_used?: string;
+}
+
+export interface UnifiedAssetWithMappings extends UnifiedAsset {
+  mappings: Array<AssetMapping & {
+    asset_symbol: string;
+    asset_platform: string;
+  }>;
+}
