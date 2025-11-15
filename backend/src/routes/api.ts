@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { ProgressEvent } from '../services/dataFetcher';
 import dataFetcherManager from '../services/dataFetcherManager';
+import { getSchedulerStatus } from '../services/scheduler';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
@@ -248,10 +249,14 @@ router.get('/status', async (req: Request, res: Response) => {
     const platform = (req.query.platform as string) || 'hyperliquid';
     const fetcher = dataFetcherManager.getFetcher(platform);
     const status = await fetcher.getStatus();
+    const schedulerStatus = getSchedulerStatus();
 
     res.json({
       success: true,
-      data: status,
+      data: {
+        ...status,
+        scheduler: schedulerStatus,
+      },
     });
   } catch (error) {
     logger.error('Status endpoint error', error);
@@ -422,10 +427,12 @@ router.get('/logs', async (req: Request, res: Response) => {
  * Health check endpoint
  */
 router.get('/health', (req: Request, res: Response) => {
+  const schedulerStatus = getSchedulerStatus();
   res.json({
     success: true,
     status: 'healthy',
     timestamp: new Date().toISOString(),
+    scheduler: schedulerStatus,
   });
 });
 
