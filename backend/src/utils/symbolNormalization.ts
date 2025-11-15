@@ -7,7 +7,6 @@
  * - Hyperliquid: "BTC" → "BTC"
  * - Binance: "BTCUSDT" → "BTC"
  * - Aster: "BTCUSDT" → "BTC"
- * - EdgeX: "BTC-USDT-PERP" → "BTC"
  */
 
 import { logger } from './logger';
@@ -68,10 +67,6 @@ export function normalizeSymbol(symbol: string, platform?: string): string {
         // Aster uses formats like "BTCUSDT"
         // Already handled by suffix removal
         break;
-      case 'edgex':
-        // EdgeX might use formats like "BTC-USDT-PERP"
-        // Already handled by suffix removal
-        break;
     }
   }
 
@@ -103,13 +98,6 @@ export function getSymbolVariations(symbol: string, sourcePlatform?: string): {
       `${normalized}USDT`,
       `${normalized}USD`,
       `${normalized}USDC`,
-    ],
-    edgex: [
-      normalized,
-      `${normalized}-USDT`,
-      `${normalized}-USDT-PERP`,
-      `${normalized}-USD`,
-      `${normalized}-PERP`,
     ],
   };
 

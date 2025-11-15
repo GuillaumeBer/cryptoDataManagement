@@ -1,7 +1,6 @@
 import { EventEmitter } from 'events';
 import HyperliquidClient from '../api/hyperliquid/client';
 import AsterClient from '../api/aster/client';
-import EdgeXClient from '../api/edgex/client';
 import BinanceClient from '../api/binance/client';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
@@ -10,7 +9,7 @@ import { CreateFundingRateParams } from '../models/types';
 import { logger } from '../utils/logger';
 
 // Union type for all platform clients
-type PlatformClient = HyperliquidClient | AsterClient | EdgeXClient | BinanceClient;
+type PlatformClient = HyperliquidClient | AsterClient | BinanceClient;
 
 export interface ProgressEvent {
   type: 'start' | 'progress' | 'complete' | 'error';
@@ -41,7 +40,6 @@ export class DataFetcherService extends EventEmitter {
         return '8h';
       case 'hyperliquid':
       case 'aster':
-      case 'edgex':
       default:
         return '1h';
     }
@@ -62,7 +60,6 @@ export class DataFetcherService extends EventEmitter {
       case 'binance':
         return 600; // 600ms = 100 req/min (respects 500 req / 5 min limit)
       case 'aster':
-      case 'edgex':
       default:
         return 100;
     }
@@ -82,9 +79,6 @@ export class DataFetcherService extends EventEmitter {
         break;
       case 'aster':
         this.platformClient = new AsterClient();
-        break;
-      case 'edgex':
-        this.platformClient = new EdgeXClient();
         break;
       default:
         logger.warn(`Unsupported platform: ${platform}, defaulting to Hyperliquid`);
