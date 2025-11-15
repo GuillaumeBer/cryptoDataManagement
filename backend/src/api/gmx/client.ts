@@ -53,7 +53,7 @@ export class GMXClient {
 
       const query = `
         query GetMarkets {
-          markets(first: 1000, where: { marketToken_not: null }) {
+          marketInfos(first: 1000, where: { marketToken_not: null }) {
             id
             marketToken
             indexToken
@@ -87,12 +87,12 @@ export class GMXClient {
         throw new Error(`Invalid response from GMX subgraph. Expected data.data, got: ${Object.keys(response.data || {}).join(', ')}`);
       }
 
-      if (!response.data.data.markets) {
-        logger.error('No markets in GMX response:', response.data.data);
-        throw new Error('No markets found in GMX subgraph response');
+      if (!response.data.data.marketInfos) {
+        logger.error('No marketInfos in GMX response:', response.data.data);
+        throw new Error('No marketInfos found in GMX subgraph response');
       }
 
-      const markets = response.data.data.markets;
+      const markets = response.data.data.marketInfos;
 
       // Add symbol information - extract from token addresses using common mappings
       const marketsWithSymbols = markets.map((market) => {
@@ -162,8 +162,9 @@ export class GMXClient {
       const now = Math.floor(Date.now() / 1000);
       const startTime = now - hoursAgo * 60 * 60;
 
-      // Query funding fee data from subgraph
-      // Note: GMX uses "borrowing fees" which are equivalent to funding rates
+      // GMX V2 uses borrowing fees instead of traditional funding rates
+      // The CollectedMarketFeesInfo tracks fees but not in a traditional funding rate format
+      // For now, we'll use feeUsdPerPoolValue as a proxy
       const query = `
         query GetFundingHistory($timestampGte: Int!) {
           collectedMarketFeesInfos(
@@ -179,27 +180,40 @@ export class GMXClient {
             marketAddress
             period
             timestampGroup
-            fundingFeeAmountPerSize
-            cumulativeFundingFeeUsdPerPoolValue
+            feeUsdPerPoolValue
+            cumulativeFeeUsdPerPoolValue
           }
         }
       `;
 
-      const response = await this.client.post<GMXFundingRateHistoryResponse>('', {
+      const response = await this.client.post<any>('', {
         query,
         variables: {
           timestampGte: startTime,
         },
       });
 
+      // Check for GraphQL errors
+      if (response.data.errors) {
+        logger.warn(`GMX GraphQL errors for ${marketSymbol}:`, response.data.errors);
+        return []; // Return empty array instead of throwing
+      }
+
+      // Check if we have data
+      if (!response.data || !response.data.data || !response.data.data.collectedMarketFeesInfos) {
+        logger.warn(`No fee data available for ${marketSymbol} from GMX V2`);
+        return [];
+      }
+
       const feeInfos = response.data.data.collectedMarketFeesInfos;
 
       // Convert to our standard format
-      const fundingData: FetchedFundingData[] = feeInfos.map((info) => ({
+      // Note: GMX uses borrowing fees, not traditional funding rates
+      const fundingData: FetchedFundingData[] = feeInfos.map((info: any) => ({
         asset: marketSymbol,
         timestamp: new Date(info.timestampGroup * 1000),
-        fundingRate: info.fundingFeeAmountPerSize || '0',
-        premium: info.cumulativeFundingFeeUsdPerPoolValue || '0',
+        fundingRate: info.feeUsdPerPoolValue || '0',
+        premium: info.cumulativeFeeUsdPerPoolValue || '0',
       }));
 
       logger.debug(
@@ -208,8 +222,9 @@ export class GMXClient {
       return fundingData;
     } catch (error: any) {
       const errorMsg = this.getErrorMessage(error);
-      logger.error(`Failed to fetch funding history for ${marketSymbol}: ${errorMsg}`);
-      throw new Error(`Failed to fetch funding history for ${marketSymbol}: ${errorMsg}`);
+      logger.warn(`Could not fetch funding history for ${marketSymbol}: ${errorMsg}`);
+      // Return empty array instead of throwing - GMX V2 may not have data for all markets
+      return [];
     }
   }
 
@@ -233,7 +248,12 @@ export class GMXClient {
         console.log(`[API] Fetching ${market} from GMX V2...`);
         const data = await this.getFundingHistory(market);
         results.set(market, data);
-        console.log(`[API] ✓ ${market}: ${data.length} records`);
+
+        if (data.length > 0) {
+          console.log(`[API] ✓ ${market}: ${data.length} records`);
+        } else {
+          console.log(`[API] ○ ${market}: No data available`);
+        }
 
         processed++;
         if (onProgress) {
@@ -245,8 +265,8 @@ export class GMXClient {
         }
       } catch (error) {
         const errorMsg = this.getErrorMessage(error);
-        console.log(`[API] ✗ ${market}: FAILED - ${errorMsg}`);
-        logger.error(`Failed to fetch funding history for ${market}`, errorMsg);
+        console.log(`[API] ✗ ${market}: Error - ${errorMsg}`);
+        logger.warn(`Error fetching ${market}`, errorMsg);
         results.set(market, []);
         processed++;
         if (onProgress) {

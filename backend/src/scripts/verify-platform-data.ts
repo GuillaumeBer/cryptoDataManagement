@@ -10,6 +10,7 @@ import { HyperliquidClient } from '../api/hyperliquid/client';
 import { BinanceClient } from '../api/binance/client';
 import { BybitClient } from '../api/bybit/client';
 import { OKXClient } from '../api/okx/client';
+import { JupiterClient } from '../api/jupiter/client';
 import FundingRateRepository from '../models/FundingRateRepository';
 import AssetRepository from '../models/AssetRepository';
 import { closePool } from '../database/connection';
@@ -411,6 +412,108 @@ async function verifyOKX(asset: string = 'BTC-USDT-SWAP'): Promise<VerificationR
 }
 
 /**
+ * Verify Jupiter funding rate data
+ */
+async function verifyJupiter(asset: string = 'SOL'): Promise<VerificationResult> {
+  console.log(`\n[JUPITER] Verifying ${asset}...`);
+  const result: VerificationResult = {
+    platform: 'jupiter',
+    asset,
+    apiDataPoints: 0,
+    dbDataPoints: 0,
+    samplingInterval: '1h',
+    rateMatches: false,
+    timestampMatches: false,
+    sampleRates: [],
+    errors: [],
+  };
+
+  try {
+    // Check if DUNE_API_KEY is set
+    if (!process.env.DUNE_API_KEY) {
+      result.errors.push('DUNE_API_KEY not set - Jupiter requires Dune Analytics API access');
+      return result;
+    }
+
+    // Fetch from Jupiter API (via Dune)
+    const client = new JupiterClient();
+    const apiData = await client.getFundingHistory(asset); // Fetches available historical data
+    result.apiDataPoints = apiData.length;
+
+    console.log(`  API returned ${apiData.length} data points`);
+
+    // Fetch from database
+    const dbAsset = await AssetRepository.findBySymbol(asset, 'jupiter');
+    if (!dbAsset) {
+      result.errors.push('Asset not found in database');
+      return result;
+    }
+
+    // Jupiter data may be limited by Dune query, so check last 30 days
+    const now = new Date();
+    const startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const dbData = await FundingRateRepository.find({
+      asset: asset,
+      platform: 'jupiter',
+      sampling_interval: '1h',
+      startDate,
+      endDate: now,
+      limit: 100,
+    });
+    result.dbDataPoints = dbData.length;
+
+    console.log(`  DB returned ${dbData.length} data points`);
+
+    if (apiData.length === 0 || dbData.length === 0) {
+      result.errors.push('No data available for comparison');
+      return result;
+    }
+
+    // Compare latest funding rate
+    const latestApi = apiData[apiData.length - 1];
+    const latestDb = dbData[0];
+
+    console.log(`  Latest API rate: ${latestApi.fundingRate} at ${latestApi.timestamp}`);
+    console.log(`  Latest DB rate:  ${latestDb.funding_rate} at ${latestDb.timestamp}`);
+
+    const apiRate = parseFloat(latestApi.fundingRate);
+    const dbRate = parseFloat(latestDb.funding_rate);
+    const rateDiff = Math.abs(apiRate - dbRate);
+    result.rateMatches = rateDiff < 0.000001;
+
+    const apiTime = new Date(latestApi.timestamp);
+    const dbTime = new Date(latestDb.timestamp);
+    const timeDiff = Math.abs(apiTime.getTime() - dbTime.getTime());
+    result.timestampMatches = timeDiff < 60000;
+
+    // Compare multiple data points
+    const samplesToCheck = Math.min(5, apiData.length, dbData.length);
+    for (let i = 0; i < samplesToCheck; i++) {
+      const api = apiData[apiData.length - 1 - i];
+      const db = dbData[i];
+      const apiR = parseFloat(api.fundingRate);
+      const dbR = parseFloat(db.funding_rate);
+      const match = Math.abs(apiR - dbR) < 0.000001;
+
+      result.sampleRates?.push({
+        api: api.fundingRate,
+        db: db.funding_rate,
+        match,
+      });
+
+      if (!match) {
+        result.errors.push(`Rate mismatch at index ${i}: API=${api.fundingRate}, DB=${db.funding_rate}`);
+      }
+    }
+
+  } catch (error) {
+    result.errors.push(`Error: ${error}`);
+  }
+
+  return result;
+}
+
+/**
  * Generate verification report
  */
 function generateReport(results: VerificationResult[]): void {
@@ -471,6 +574,10 @@ async function main() {
   results.push(await verifyOKX('BTC-USDT-SWAP'));
   results.push(await verifyOKX('ETH-USDT-SWAP'));
 
+  results.push(await verifyJupiter('SOL'));
+  results.push(await verifyJupiter('ETH'));
+  results.push(await verifyJupiter('WBTC'));
+
   // Generate report
   generateReport(results);
 
@@ -490,4 +597,4 @@ if (require.main === module) {
     });
 }
 
-export { verifyBinance, verifyHyperliquid, verifyBybit, verifyOKX };
+export { verifyBinance, verifyHyperliquid, verifyBybit, verifyOKX, verifyJupiter };

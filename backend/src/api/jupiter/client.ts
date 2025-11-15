@@ -12,8 +12,8 @@ export class JupiterClient {
   private duneClient: AxiosInstance;
   private duneApiKey: string | undefined;
   private readonly DUNE_QUERY_ID = 3338148; // Community-validated borrow rate query
-  private readonly MAX_POLL_ATTEMPTS = 30; // Max 30 attempts (30 seconds with 1s delay)
-  private readonly POLL_DELAY_MS = 1000; // 1 second between polls
+  private readonly MAX_POLL_ATTEMPTS = 60; // Max 60 attempts (120 seconds with 2s delay)
+  private readonly POLL_DELAY_MS = 2000; // 2 seconds between polls
 
   constructor() {
     // Jupiter Perpetuals uses Dune Analytics for historical borrow rate data

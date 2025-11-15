@@ -173,53 +173,60 @@ export class DataFetcherService extends EventEmitter {
       const assets = await this.platformClient.getAssets();
 
       // Normalize asset data across platforms
-      await AssetRepository.bulkUpsert(
-        assets.map((a: any) => {
-          // Handle different property names across platforms
-          // Hyperliquid/Binance/Bybit: uses 'name' or 'symbol'
-          // OKX: uses 'instId' (e.g., "BTC-USDT-SWAP")
-          // DyDx V4: uses 'ticker' (e.g., "BTC-USD")
-          // GMX V2: uses 'indexTokenSymbol' (e.g., "BTC-USD")
-          const symbol = a.name || a.symbol || a.instId || a.ticker || a.indexTokenSymbol;
-          return {
-            symbol,
-            platform: this.platform,
-            name: symbol,
-          };
-        })
+      const normalizedAssets = assets.map((a: any) => {
+        // Handle different property names across platforms
+        // Hyperliquid/Binance/Bybit: uses 'name' or 'symbol'
+        // OKX: uses 'instId' (e.g., "BTC-USDT-SWAP")
+        // DyDx V4: uses 'ticker' (e.g., "BTC-USD")
+        // GMX V2: uses 'indexTokenSymbol' (e.g., "BTC-USD")
+        const symbol = a.name || a.symbol || a.instId || a.ticker || a.indexTokenSymbol;
+        return {
+          symbol,
+          platform: this.platform,
+          name: symbol,
+        };
+      });
+
+      // Deduplicate assets by symbol to avoid "ON CONFLICT DO UPDATE cannot affect row a second time" error
+      // This is especially important for GMX V2 which has multiple markets per index token
+      const uniqueAssets = Array.from(
+        new Map(normalizedAssets.map(asset => [asset.symbol, asset])).values()
       );
 
-      logger.info(`Stored ${assets.length} assets in database`);
+      logger.info(`Normalized ${assets.length} assets, ${uniqueAssets.length} unique symbols`);
+      await AssetRepository.bulkUpsert(uniqueAssets);
+
+      logger.info(`Stored ${uniqueAssets.length} unique assets in database`);
+
+      // Step 2: Fetch funding history for each unique asset
+      // Use unique symbols to match what we stored in the database
+      const assetSymbols = uniqueAssets.map(a => a.symbol);
 
       // Emit start event
-      console.log(`[PROGRESS] START: 0/${assets.length} assets`);
+      console.log(`[PROGRESS] START: 0/${assetSymbols.length} assets`);
       this.currentProgress = {
         type: 'start',
-        totalAssets: assets.length,
+        totalAssets: assetSymbols.length,
         processedAssets: 0,
         recordsFetched: 0,
         errors: [],
         percentage: 0,
       };
       this.emit('progress', this.currentProgress);
-
-      // Step 2: Fetch funding history for each asset
-      // Handle different property names: Hyperliquid/Binance/Bybit use 'name'/'symbol', OKX uses 'instId', DyDx uses 'ticker', GMX uses 'indexTokenSymbol'
-      const assetSymbols = assets.map((a: any) => a.name || a.symbol || a.instId || a.ticker || a.indexTokenSymbol);
       const fundingDataMap = await this.platformClient.getFundingHistoryBatch(
         assetSymbols,
         this.getRateLimitDelay(), // Platform-specific rate limit delay
         (currentSymbol: string, processed: number) => {
           // Emit progress event for each asset
-          console.log(`[PROGRESS] ${processed}/${assets.length} - Current: ${currentSymbol} (${Math.round((processed / assets.length) * 100)}%)`);
+          console.log(`[PROGRESS] ${processed}/${assetSymbols.length} - Current: ${currentSymbol} (${Math.round((processed / assetSymbols.length) * 100)}%)`);
           this.currentProgress = {
             type: 'progress',
-            totalAssets: assets.length,
+            totalAssets: assetSymbols.length,
             processedAssets: processed,
             currentAsset: currentSymbol,
             recordsFetched,
             errors,
-            percentage: Math.round((processed / assets.length) * 100),
+            percentage: Math.round((processed / assetSymbols.length) * 100),
           };
           this.emit('progress', this.currentProgress);
         }
