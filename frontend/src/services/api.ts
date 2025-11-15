@@ -23,8 +23,9 @@ class ApiClient {
   }
 
   // System endpoints
-  async getStatus(): Promise<SystemStatus> {
-    const response = await this.client.get<ApiResponse<SystemStatus>>('/status');
+  async getStatus(platform?: string): Promise<SystemStatus> {
+    const params = platform ? { platform } : {};
+    const response = await this.client.get<ApiResponse<SystemStatus>>('/status', { params });
     return response.data.data!;
   }
 

@@ -2,10 +2,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from '../services/api';
 
 // System hooks
-export function useSystemStatus() {
+export function useSystemStatus(platform?: string) {
   return useQuery({
-    queryKey: ['status'],
-    queryFn: () => apiClient.getStatus(),
+    queryKey: ['status', platform],
+    queryFn: () => apiClient.getStatus(platform),
     refetchInterval: 30000, // Refetch every 30 seconds
   });
 }

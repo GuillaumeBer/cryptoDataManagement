@@ -19,7 +19,7 @@ const PLATFORMS: { id: Platform; name: string; enabled: boolean }[] = [
 export default function Dashboard() {
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('hyperliquid');
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
-  const { data: status } = useSystemStatus();
+  const { data: status } = useSystemStatus(selectedPlatform);
   const { data: assets } = useAssets(selectedPlatform);
 
   // Reset selected asset when switching platforms
@@ -37,7 +37,7 @@ export default function Dashboard() {
             Crypto Data Management
           </h1>
           <p className="mt-1 text-sm text-gray-500">
-            Historical funding rate data from Hyperliquid
+            Historical funding rate data from multiple platforms
           </p>
         </div>
       </header>
