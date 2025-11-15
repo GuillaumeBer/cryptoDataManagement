@@ -1,5 +1,4 @@
 import { Router, Request, Response } from 'express';
-import { ProgressEvent } from '../services/dataFetcher';
 import dataFetcherManager from '../services/dataFetcherManager';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
@@ -8,6 +7,7 @@ import UnifiedAssetRepository from '../models/UnifiedAssetRepository';
 import AssetMappingRepository from '../models/AssetMappingRepository';
 import assetMappingService from '../services/assetMappingService';
 import { logger } from '../utils/logger';
+import createProgressStream from './createProgressStream';
 
 const router = Router();
 
@@ -15,149 +15,19 @@ const router = Router();
  * GET /api/fetch/stream
  * Server-Sent Events endpoint for initial data fetch with real-time progress
  */
-router.get('/fetch/stream', async (req: Request, res: Response) => {
-  // Get platform from query parameter (default to hyperliquid)
-  const platform = (req.query.platform as string) || 'hyperliquid';
-
-  // Set headers for SSE
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('X-Accel-Buffering', 'no'); // Disable buffering for nginx
-  res.setHeader('Transfer-Encoding', 'chunked');
-
-  // Disable socket buffering
-  req.socket.setNoDelay(true);
-  req.socket.setTimeout(0);
-
-  // Flush headers to establish SSE connection
-  res.flushHeaders();
-
-  logger.info(`SSE stream started for initial fetch on platform: ${platform}`);
-
-  // Get the platform-specific fetcher
-  const fetcher = dataFetcherManager.getFetcher(platform);
-
-  // Set up progress listener that closes connection on completion
-  const progressListener = (event: ProgressEvent) => {
-    console.log(`[SSE] Received progress event: ${event.type}, ${event.processedAssets}/${event.totalAssets}`);
-    logger.debug(`Progress event: ${event.type}, ${event.processedAssets}/${event.totalAssets}`);
-    const written = res.write(`data: ${JSON.stringify(event)}\n\n`);
-    console.log(`[SSE] Write returned: ${written}`);
-
-    // Close connection when fetch completes or errors
-    if (event.type === 'complete' || event.type === 'error') {
-      res.write('data: {"type":"done"}\n\n');
-      res.end();
-      fetcher.removeListener('progress', progressListener);
-    }
-  };
-
-  console.log('[SSE] Setting up progress listener...');
-  fetcher.on('progress', progressListener);
-  console.log('[SSE] Progress listener attached.');
-
-  // Send initial connection event
-  res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
-
-  // If there's already progress, send it immediately
-  const currentProgress = fetcher.getCurrentProgress();
-  if (currentProgress) {
-    console.log('[SSE] Reconnecting to ongoing fetch, sending current progress');
-    res.write(`data: ${JSON.stringify(currentProgress)}\n\n`);
-  }
-
-  // Handle client disconnect
-  req.on('close', () => {
-    console.log('[SSE] Client disconnected, removing listener');
-    fetcher.removeListener('progress', progressListener);
-  });
-
-  try {
-    // Only start a new fetch if none is in progress
-    if (!fetcher.isFetchInProgress()) {
-      console.log('[SSE] Starting new fetch...');
-      await fetcher.fetchInitialData();
-      // Note: Connection will be closed by progressListener on complete event
-    } else {
-      console.log('[SSE] Fetch already in progress, listening for updates...');
-      // Keep connection open - progressListener will close it on completion
-    }
-  } catch (error) {
-    logger.error('SSE fetch error', error);
-    res.write(`data: ${JSON.stringify({ type: 'error', message: `${error}` })}\n\n`);
-    res.end();
-    fetcher.removeListener('progress', progressListener);
-  }
-});
+router.get(
+  '/fetch/stream',
+  createProgressStream('fetch/stream', async (fetcher) => fetcher.fetchInitialData())
+);
 
 /**
  * GET /api/fetch/incremental/stream
  * Server-Sent Events endpoint for incremental fetch with real-time progress
  */
-router.get('/fetch/incremental/stream', async (req: Request, res: Response) => {
-  // Get platform from query parameter (default to hyperliquid)
-  const platform = (req.query.platform as string) || 'hyperliquid';
-
-  // Set headers for SSE
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('X-Accel-Buffering', 'no'); // Disable buffering for nginx
-
-  // Flush headers to establish SSE connection
-  res.flushHeaders();
-
-  logger.info(`SSE stream started for incremental fetch on platform: ${platform}`);
-
-  // Get the platform-specific fetcher
-  const fetcher = dataFetcherManager.getFetcher(platform);
-
-  // Set up progress listener that closes connection on completion
-  const progressListener = (event: ProgressEvent) => {
-    logger.debug(`Incremental progress event: ${event.type}, ${event.processedAssets}/${event.totalAssets}`);
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
-
-    // Close connection when fetch completes or errors
-    if (event.type === 'complete' || event.type === 'error') {
-      res.write('data: {"type":"done"}\n\n');
-      res.end();
-      fetcher.removeListener('progress', progressListener);
-    }
-  };
-
-  fetcher.on('progress', progressListener);
-
-  // Send initial connection event
-  res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
-
-  // If there's already progress, send it immediately
-  const currentProgress = fetcher.getCurrentProgress();
-  if (currentProgress) {
-    res.write(`data: ${JSON.stringify(currentProgress)}\n\n`);
-  }
-
-  // Handle client disconnect
-  req.on('close', () => {
-    fetcher.removeListener('progress', progressListener);
-  });
-
-  try {
-    // Only start a new fetch if none is in progress
-    if (!fetcher.isFetchInProgress()) {
-      await fetcher.fetchIncrementalData();
-      // Note: Connection will be closed by progressListener on complete event
-    }
-    // If fetch is already in progress, progressListener will close connection on completion
-  } catch (error) {
-    logger.error('SSE incremental fetch error', error);
-    res.write(`data: ${JSON.stringify({ type: 'error', message: `${error}` })}\n\n`);
-    res.end();
-    fetcher.removeListener('progress', progressListener);
-  }
-});
+router.get(
+  '/fetch/incremental/stream',
+  createProgressStream('fetch/incremental/stream', async (fetcher) => fetcher.fetchIncrementalData())
+);
 
 /**
  * POST /api/fetch

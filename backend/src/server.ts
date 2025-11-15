@@ -7,6 +7,7 @@ import apiRoutes from './routes/api';
 import { logger } from './utils/logger';
 import { testConnection } from './database/connection';
 import { startScheduler } from './services/scheduler';
+import allowedOrigins from './config/allowedOrigins';
 
 const app: Express = express();
 const PORT = process.env.PORT || 3000;
@@ -24,12 +25,6 @@ app.use(compression({
     return compression.filter(req, res);
   }
 }));
-
-// CORS configuration
-const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [
-  'http://localhost:5173',
-  'http://localhost:3000',
-];
 
 app.use(
   cors({
