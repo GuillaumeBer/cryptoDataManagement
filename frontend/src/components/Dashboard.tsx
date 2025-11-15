@@ -18,7 +18,7 @@ const PLATFORMS: { id: Platform; name: string; enabled: boolean }[] = [
   // CEX Platforms
   { id: 'binance', name: 'Binance Futures', enabled: true },
   { id: 'bybit', name: 'Bybit', enabled: true },
-  { id: 'okx', name: 'OKX', enabled: false },
+  { id: 'okx', name: 'OKX', enabled: true },
 ];
 
 export default function Dashboard() {

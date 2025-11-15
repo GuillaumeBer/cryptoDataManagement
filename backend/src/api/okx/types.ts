@@ -1,29 +1,47 @@
-// OKX API types
+// OKX V5 API types
+// Documentation: https://www.okx.com/docs-v5/en/
 
 export interface OKXInstrument {
-  instId: string; // Instrument ID, e.g., "BTC-USDT-SWAP"
-  instType: string; // Instrument type: SWAP, FUTURES, etc.
-  state: string; // live, suspend, etc.
+  instType: string; // "SWAP"
+  instId: string; // e.g., "BTC-USDT-SWAP"
+  uly: string; // Underlying, e.g., "BTC-USDT"
+  category: string; // "1" for linear contracts
+  baseCcy: string; // Base currency, e.g., "BTC"
+  quoteCcy: string; // Quote currency, e.g., "USDT"
+  settleCcy: string; // Settlement currency, e.g., "USDT"
   ctVal: string; // Contract value
   ctMult: string; // Contract multiplier
+  ctValCcy: string; // Contract value currency
+  listTime: string; // Listing time, Unix timestamp in milliseconds
+  expTime: string; // Expiry time, Unix timestamp in milliseconds (for futures)
+  lever: string; // Max leverage
+  tickSz: string; // Tick size
+  lotSz: string; // Lot size
+  minSz: string; // Minimum order size
+  ctType: string; // Contract type: linear, inverse
+  alias: string; // Alias for futures
+  state: string; // Status: live, suspend, preopen, test
 }
 
 export interface OKXInstrumentsResponse {
-  code: string;
-  msg: string;
+  code: string; // "0" for success
+  msg: string; // "" for success, error message otherwise
   data: OKXInstrument[];
 }
 
 export interface OKXFundingRate {
-  instId: string;
-  fundingRate: string;
-  fundingTime: string; // Unix timestamp in milliseconds
-  realizedRate: string;
+  instType: string; // "SWAP"
+  instId: string; // e.g., "BTC-USDT-SWAP"
+  fundingRate: string; // e.g., "0.0001" (historical rate)
+  nextFundingRate: string; // Next funding rate (predicted)
+  fundingTime: string; // Funding time, Unix timestamp in milliseconds
+  nextFundingTime: string; // Next funding time
+  realizedRate: string; // Realized funding rate
 }
 
-export interface OKXFundingRateResponse {
-  code: string;
-  msg: string;
+export interface OKXFundingRateHistoryResponse {
+  code: string; // "0" for success
+  msg: string; // "" for success, error message otherwise
   data: OKXFundingRate[];
 }
 
