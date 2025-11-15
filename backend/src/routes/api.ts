@@ -214,6 +214,32 @@ router.post('/fetch/incremental', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/resample/hyperliquid-8h
+ * Resample Hyperliquid 1-hour data to 8-hour intervals for comparison with Binance
+ */
+router.post('/resample/hyperliquid-8h', async (req: Request, res: Response) => {
+  try {
+    logger.info('Resampling Hyperliquid data to 8-hour intervals');
+
+    const fetcher = dataFetcherManager.getFetcher('hyperliquid');
+    const result = await fetcher.resampleHyperliquidTo8h();
+
+    res.json({
+      success: true,
+      message: '8-hour resampling completed',
+      data: result,
+    });
+  } catch (error) {
+    logger.error('Resampling endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to resample data',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
  * GET /api/status
  * Get system status and last fetch information
  */
@@ -279,17 +305,18 @@ router.get('/assets', async (req: Request, res: Response) => {
 /**
  * GET /api/funding-rates
  * Get funding rates with filters
- * Query params: asset, startDate, endDate, platform, limit, offset
+ * Query params: asset, startDate, endDate, platform, sampling_interval, limit, offset
  */
 router.get('/funding-rates', async (req: Request, res: Response) => {
   try {
-    const { asset, startDate, endDate, platform, limit, offset } = req.query;
+    const { asset, startDate, endDate, platform, sampling_interval, limit, offset } = req.query;
 
-    console.log('[API] Funding rates request:', { asset, startDate, endDate, platform, limit, offset });
+    console.log('[API] Funding rates request:', { asset, startDate, endDate, platform, sampling_interval, limit, offset });
 
     const query: any = {
       asset: asset as string,
       platform: platform as string,
+      sampling_interval: sampling_interval as string,
       limit: limit ? parseInt(limit as string) : 1000,
       offset: offset ? parseInt(offset as string) : 0,
     };
@@ -313,6 +340,7 @@ router.get('/funding-rates', async (req: Request, res: Response) => {
       query: {
         asset: query.asset || 'all',
         platform: query.platform || 'all',
+        sampling_interval: query.sampling_interval || 'all',
         startDate: query.startDate,
         endDate: query.endDate,
         limit: query.limit,

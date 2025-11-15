@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS assets (
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
--- Funding rates table: stores hourly funding rate data
+-- Funding rates table: stores funding rate data at various sampling intervals
 CREATE TABLE IF NOT EXISTS funding_rates (
   id SERIAL PRIMARY KEY,
   asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
@@ -19,14 +19,17 @@ CREATE TABLE IF NOT EXISTS funding_rates (
   funding_rate DECIMAL(20, 10) NOT NULL,
   premium DECIMAL(20, 10),
   platform VARCHAR(50) NOT NULL,
+  sampling_interval VARCHAR(10) DEFAULT '1h' NOT NULL, -- '1h', '8h', etc.
   fetched_at TIMESTAMP DEFAULT NOW(),
-  CONSTRAINT unique_funding_rate UNIQUE(asset_id, timestamp, platform)
+  CONSTRAINT unique_funding_rate UNIQUE(asset_id, timestamp, platform, sampling_interval)
 );
 
 -- Indexes for faster queries
 CREATE INDEX IF NOT EXISTS idx_funding_rates_asset_id ON funding_rates(asset_id);
 CREATE INDEX IF NOT EXISTS idx_funding_rates_timestamp ON funding_rates(timestamp);
 CREATE INDEX IF NOT EXISTS idx_funding_rates_asset_time ON funding_rates(asset_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_funding_rates_sampling_interval ON funding_rates(sampling_interval);
+CREATE INDEX IF NOT EXISTS idx_funding_rates_platform_interval ON funding_rates(platform, sampling_interval);
 CREATE INDEX IF NOT EXISTS idx_assets_platform ON assets(platform);
 CREATE INDEX IF NOT EXISTS idx_assets_symbol ON assets(symbol);
 

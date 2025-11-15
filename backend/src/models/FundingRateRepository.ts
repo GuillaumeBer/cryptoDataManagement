@@ -13,15 +13,15 @@ export class FundingRateRepository {
    * Create a single funding rate record
    */
   async create(params: CreateFundingRateParams): Promise<FundingRate> {
-    const { asset_id, timestamp, funding_rate, premium, platform } = params;
+    const { asset_id, timestamp, funding_rate, premium, platform, sampling_interval = '1h' } = params;
 
     const result = await query<FundingRate>(
-      `INSERT INTO funding_rates (asset_id, timestamp, funding_rate, premium, platform)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (asset_id, timestamp, platform) DO UPDATE
+      `INSERT INTO funding_rates (asset_id, timestamp, funding_rate, premium, platform, sampling_interval)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (asset_id, timestamp, platform, sampling_interval) DO UPDATE
        SET funding_rate = EXCLUDED.funding_rate, premium = EXCLUDED.premium
        RETURNING *`,
-      [asset_id, timestamp, funding_rate, premium, platform]
+      [asset_id, timestamp, funding_rate, premium, platform, sampling_interval]
     );
 
     return result.rows[0];
@@ -36,7 +36,7 @@ export class FundingRateRepository {
     const values = records
       .map(
         (_, i) =>
-          `($${i * 5 + 1}, $${i * 5 + 2}, $${i * 5 + 3}, $${i * 5 + 4}, $${i * 5 + 5})`
+          `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`
       )
       .join(', ');
 
@@ -46,12 +46,13 @@ export class FundingRateRepository {
       r.funding_rate,
       r.premium,
       r.platform,
+      r.sampling_interval || '1h',
     ]);
 
     const result = await query(
-      `INSERT INTO funding_rates (asset_id, timestamp, funding_rate, premium, platform)
+      `INSERT INTO funding_rates (asset_id, timestamp, funding_rate, premium, platform, sampling_interval)
        VALUES ${values}
-       ON CONFLICT (asset_id, timestamp, platform) DO NOTHING`,
+       ON CONFLICT (asset_id, timestamp, platform, sampling_interval) DO NOTHING`,
       params
     );
 
@@ -64,7 +65,7 @@ export class FundingRateRepository {
    * Query funding rates with filters
    */
   async find(params: FundingRateQuery): Promise<FundingRateWithAsset[]> {
-    const { asset, startDate, endDate, platform, limit = 1000, offset = 0 } = params;
+    const { asset, startDate, endDate, platform, sampling_interval, limit = 1000, offset = 0 } = params;
 
     const conditions: string[] = [];
     const values: any[] = [];
@@ -78,6 +79,11 @@ export class FundingRateRepository {
     if (platform) {
       conditions.push(`fr.platform = $${paramIndex++}`);
       values.push(platform);
+    }
+
+    if (sampling_interval) {
+      conditions.push(`fr.sampling_interval = $${paramIndex++}`);
+      values.push(sampling_interval);
     }
 
     if (startDate) {
@@ -113,12 +119,12 @@ export class FundingRateRepository {
   /**
    * Get latest timestamp for an asset
    */
-  async getLatestTimestamp(assetId: number, platform: string): Promise<Date | null> {
+  async getLatestTimestamp(assetId: number, platform: string, samplingInterval: string = '1h'): Promise<Date | null> {
     const result = await query<{ timestamp: Date }>(
       `SELECT MAX(timestamp) as timestamp
        FROM funding_rates
-       WHERE asset_id = $1 AND platform = $2`,
-      [assetId, platform]
+       WHERE asset_id = $1 AND platform = $2 AND sampling_interval = $3`,
+      [assetId, platform, samplingInterval]
     );
 
     return result.rows[0]?.timestamp || null;

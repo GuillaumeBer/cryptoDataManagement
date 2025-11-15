@@ -74,9 +74,10 @@ export class BinanceClient {
     try {
       logger.debug(`Fetching funding history for ${symbol} from Binance`);
 
-      // Calculate startTime: last 20 days (60 funding periods at 8h each)
-      const daysAgo = 20;
-      const startTime = Date.now() - (daysAgo * 24 * 60 * 60 * 1000);
+      // Calculate startTime: 480 hours ago to match Hyperliquid's depth
+      // This equals 60 funding periods (480h / 8h per period)
+      const hoursAgo = 480;
+      const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
 
       const response = await this.client.get<BinanceFundingRate[]>('/fapi/v1/fundingRate', {
         params: {

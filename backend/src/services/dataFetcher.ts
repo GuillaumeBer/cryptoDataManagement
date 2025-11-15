@@ -30,6 +30,25 @@ export class DataFetcherService extends EventEmitter {
   private isIncrementalFetchInProgress = false;
   private currentProgress: ProgressEvent | null = null;
 
+  /**
+   * Get the sampling interval for each platform
+   * - Hyperliquid: 1h (hourly funding)
+   * - Binance: 8h (tri-daily funding at 00:00, 08:00, 16:00 UTC)
+   * - Other platforms: 1h (default to hourly)
+   */
+  private getSamplingInterval(): string {
+    switch (this.platform) {
+      case 'binance':
+        return '8h';
+      case 'hyperliquid':
+      case 'lighter':
+      case 'aster':
+      case 'edgex':
+      default:
+        return '1h';
+    }
+  }
+
   constructor(platform: string = 'hyperliquid') {
     super();
     this.platform = platform.toLowerCase();
@@ -166,6 +185,7 @@ export class DataFetcherService extends EventEmitter {
             funding_rate: fd.fundingRate,
             premium: fd.premium,
             platform: this.platform,
+            sampling_interval: this.getSamplingInterval(),
           }));
 
           const inserted = await FundingRateRepository.bulkInsert(records);
@@ -316,7 +336,8 @@ export class DataFetcherService extends EventEmitter {
           // Get latest timestamp we have for this asset
           const latestTimestamp = await FundingRateRepository.getLatestTimestamp(
             asset.id,
-            this.platform
+            this.platform,
+            this.getSamplingInterval()
           );
 
           // Filter only new records
@@ -335,6 +356,7 @@ export class DataFetcherService extends EventEmitter {
             funding_rate: fd.fundingRate,
             premium: fd.premium,
             platform: this.platform,
+            sampling_interval: this.getSamplingInterval(),
           }));
 
           const inserted = await FundingRateRepository.bulkInsert(records);
@@ -403,6 +425,130 @@ export class DataFetcherService extends EventEmitter {
       // Always clear the in-progress flag and current progress
       this.isIncrementalFetchInProgress = false;
       this.currentProgress = null;
+    }
+  }
+
+  /**
+   * Resample Hyperliquid 1-hour funding rates to 8-hour intervals
+   * This creates 8-hour aggregated data to match Binance's interval
+   *
+   * Methodology:
+   * - Hyperliquid computes an 8-hour rate but pays it hourly at 1/8th
+   * - To get the 8-hour rate, we sum 8 consecutive hourly rates
+   * - Aligned to 00:00, 08:00, 16:00 UTC to match Binance
+   */
+  async resampleHyperliquidTo8h(): Promise<{
+    assetsProcessed: number;
+    recordsCreated: number;
+    errors: string[];
+  }> {
+    if (this.platform !== 'hyperliquid') {
+      throw new Error('Resampling is only supported for Hyperliquid platform');
+    }
+
+    logger.info('Starting 8-hour resampling of Hyperliquid funding rates');
+    const errors: string[] = [];
+    let assetsProcessed = 0;
+    let recordsCreated = 0;
+
+    try {
+      // Get all Hyperliquid assets
+      const assets = await AssetRepository.findByPlatform('hyperliquid');
+
+      for (const asset of assets) {
+        try {
+          // Get all 1h funding rates for this asset
+          const hourlyRates = await FundingRateRepository.find({
+            asset: asset.symbol,
+            platform: 'hyperliquid',
+            sampling_interval: '1h',
+            limit: 100000, // Get all records
+          });
+
+          if (hourlyRates.length === 0) {
+            continue;
+          }
+
+          // Group by 8-hour intervals (aligned to 00:00, 08:00, 16:00 UTC)
+          const eightHourBuckets = new Map<number, typeof hourlyRates>();
+
+          for (const rate of hourlyRates) {
+            const timestamp = new Date(rate.timestamp);
+            const hour = timestamp.getUTCHours();
+
+            // Determine which 8-hour bucket this belongs to
+            let bucketHour: number;
+            if (hour >= 0 && hour < 8) {
+              bucketHour = 0;
+            } else if (hour >= 8 && hour < 16) {
+              bucketHour = 8;
+            } else {
+              bucketHour = 16;
+            }
+
+            // Create bucket timestamp (start of 8-hour period)
+            const bucketTimestamp = new Date(timestamp);
+            bucketTimestamp.setUTCHours(bucketHour, 0, 0, 0);
+            const bucketKey = bucketTimestamp.getTime();
+
+            if (!eightHourBuckets.has(bucketKey)) {
+              eightHourBuckets.set(bucketKey, []);
+            }
+            eightHourBuckets.get(bucketKey)!.push(rate);
+          }
+
+          // Calculate 8-hour rates and insert
+          const resampledRecords: CreateFundingRateParams[] = [];
+
+          for (const [bucketTime, rates] of eightHourBuckets.entries()) {
+            // Only create 8h record if we have all 8 hours of data
+            if (rates.length === 8) {
+              // Sum the 8 hourly rates to get the 8-hour rate
+              const sum8hRate = rates.reduce(
+                (sum, r) => sum + parseFloat(r.funding_rate),
+                0
+              );
+
+              // Average the premium values
+              const avgPremium = rates.reduce(
+                (sum, r) => sum + (r.premium ? parseFloat(r.premium) : 0),
+                0
+              ) / rates.length;
+
+              resampledRecords.push({
+                asset_id: asset.id,
+                timestamp: new Date(bucketTime),
+                funding_rate: sum8hRate.toString(),
+                premium: avgPremium.toString(),
+                platform: 'hyperliquid',
+                sampling_interval: '8h',
+              });
+            }
+          }
+
+          if (resampledRecords.length > 0) {
+            const inserted = await FundingRateRepository.bulkInsert(resampledRecords);
+            recordsCreated += inserted;
+            logger.debug(`Created ${inserted} 8-hour records for ${asset.symbol}`);
+          }
+
+          assetsProcessed++;
+        } catch (error) {
+          const errorMsg = `Failed to resample ${asset.symbol}: ${error}`;
+          logger.error(errorMsg);
+          errors.push(errorMsg);
+        }
+      }
+
+      logger.info(
+        `Resampling completed: ${assetsProcessed} assets, ${recordsCreated} 8-hour records created`
+      );
+
+      return { assetsProcessed, recordsCreated, errors };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      logger.error('Resampling failed:', errorMsg);
+      throw new Error(errorMsg);
     }
   }
 

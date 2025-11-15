@@ -16,6 +16,7 @@ export interface FundingRate {
   funding_rate: string;
   premium: string | null;
   platform: string;
+  sampling_interval: string; // '1h', '8h', etc.
   fetched_at: Date;
 }
 
@@ -44,6 +45,7 @@ export interface CreateFundingRateParams {
   funding_rate: string;
   premium?: string;
   platform: string;
+  sampling_interval?: string; // Defaults to '1h' if not specified
 }
 
 export interface FundingRateQuery {
@@ -51,6 +53,7 @@ export interface FundingRateQuery {
   startDate?: Date;
   endDate?: Date;
   platform?: string;
+  sampling_interval?: string; // Filter by sampling interval ('1h', '8h', etc.)
   limit?: number;
   offset?: number;
 }
