@@ -1,4 +1,4 @@
-import { ReactNode, createContext, useCallback, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useMemo, useState } from 'react';
 
 export type ToastType = 'info' | 'success' | 'error';
 
@@ -16,7 +16,7 @@ interface ToastContextValue {
 export const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 
 interface ToastProviderProps {
-  children: ReactNode;
+  children: React.ReactNode;
 }
 
 export function ToastProvider({ children }: ToastProviderProps) {
