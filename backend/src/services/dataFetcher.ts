@@ -66,18 +66,28 @@ export class DataFetcherService extends EventEmitter {
    * - Aster: 100ms default
    */
   private getRateLimitDelay(): number {
-    switch (this.platform) {
-      case 'hyperliquid':
-        return 2500; // 2.5s delay for Hyperliquid's weight-based limit
-      case 'binance':
-      case 'bybit':
-      case 'okx':
-        return 600; // 600ms = 100 req/min (placeholder for Bybit/OKX)
-      case 'dydx':
-      case 'aster':
-      default:
-        return 100;
+    const baseDelay = (() => {
+      switch (this.platform) {
+        case 'hyperliquid':
+          return 2500; // 2.5s delay for Hyperliquid's weight-based limit
+        case 'binance':
+        case 'bybit':
+        case 'okx':
+          return 600; // 600ms = 100 req/min (placeholder for Bybit/OKX)
+        case 'dydx':
+        case 'aster':
+        default:
+          return 100;
+      }
+    })();
+
+    // For exchanges with hard per-request limits, scale delay by concurrency so
+    // the aggregate throughput stays within the documented rate limits.
+    if (['binance', 'bybit', 'okx'].includes(this.platform)) {
+      return baseDelay * this.getConcurrencyLimit();
     }
+
+    return baseDelay;
   }
 
   /**
