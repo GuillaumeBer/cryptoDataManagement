@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { query, testConnection, closePool } from './connection';
 import { logger } from '../utils/logger';
@@ -26,6 +26,31 @@ async function runMigrations() {
 
     for (const statement of statements) {
       await query(statement);
+    }
+
+    logger.info('Base schema applied');
+
+    // Run migration files in order
+    const migrationsDir = join(__dirname, 'migrations');
+    const migrationFiles = readdirSync(migrationsDir)
+      .filter((file) => file.endsWith('.sql'))
+      .sort(); // This will sort 001_*, 002_*, etc. in order
+
+    for (const file of migrationFiles) {
+      logger.info(`Running migration: ${file}`);
+      const migrationPath = join(migrationsDir, file);
+      const migration = readFileSync(migrationPath, 'utf-8');
+
+      const migrationStatements = migration
+        .split(';')
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0 && !s.startsWith('--'));
+
+      for (const statement of migrationStatements) {
+        await query(statement);
+      }
+
+      logger.info(`Migration completed: ${file}`);
     }
 
     logger.info('Database migrations completed successfully');

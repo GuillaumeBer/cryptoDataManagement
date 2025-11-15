@@ -3,7 +3,7 @@
 -- Assets table: stores information about perpetual contracts
 CREATE TABLE IF NOT EXISTS assets (
   id SERIAL PRIMARY KEY,
-  symbol VARCHAR(50) UNIQUE NOT NULL,
+  symbol VARCHAR(100) UNIQUE NOT NULL,
   platform VARCHAR(50) NOT NULL,
   name VARCHAR(255),
   is_active BOOLEAN DEFAULT true,
@@ -52,7 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_fetch_logs_started_at ON fetch_logs(started_at DE
 -- Unified assets table: represents a single asset across all platforms
 CREATE TABLE IF NOT EXISTS unified_assets (
   id SERIAL PRIMARY KEY,
-  normalized_symbol VARCHAR(50) UNIQUE NOT NULL,
+  normalized_symbol VARCHAR(100) UNIQUE NOT NULL,
   display_name VARCHAR(255),
   description TEXT,
   created_at TIMESTAMP DEFAULT NOW(),
