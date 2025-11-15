@@ -139,11 +139,13 @@ export class OKXClient {
 
       // Fetch up to 100 records at a time until we have enough or no more data
       while (hasMore && allResults.length < 60) {
+        // Note: OKX API works better with just 'before' parameter for pagination
+        // Using both 'before' and 'after' causes the API to return empty results
         const response = await this.client.get<OKXFundingRateHistoryResponse>('/api/v5/public/funding-rate-history', {
           params: {
             instId,
             before: currentBefore.toString(),
-            after: after.toString(),
+            // Removed 'after' - causes empty results when combined with 'before'
             limit: 100,
           },
         });
@@ -154,8 +156,15 @@ export class OKXClient {
         }
 
         const fundingData = response.data.data;
+
+        // Debug logging to see what OKX is returning
         if (!fundingData || !Array.isArray(fundingData) || fundingData.length === 0) {
-          logger.debug(`No more funding data found for ${instId}`);
+          logger.warn(`No funding data from OKX for ${instId}. Response:`, {
+            code: response.data.code,
+            msg: response.data.msg,
+            dataLength: fundingData?.length || 0,
+            params: { instId, before: currentBefore, after, limit: 100 }
+          });
           hasMore = false;
           break;
         }
@@ -176,15 +185,25 @@ export class OKXClient {
         } else {
           // Set 'before' to the oldest timestamp we just received for next page
           const oldestTimestamp = parseInt(fundingData[fundingData.length - 1].fundingTime);
-          currentBefore = oldestTimestamp;
 
-          // Small delay between pagination requests to avoid rate limiting
-          await this.sleep(100);
+          // Stop if we've gone back before our 'after' limit (480 hours ago)
+          if (oldestTimestamp <= after) {
+            logger.debug(`Reached time limit for ${instId}, stopping pagination`);
+            hasMore = false;
+          } else {
+            currentBefore = oldestTimestamp;
+
+            // Small delay between pagination requests to avoid rate limiting
+            await this.sleep(100);
+          }
         }
       }
 
-      logger.debug(`Fetched ${allResults.length} funding rate records for ${instId}`);
-      return allResults;
+      // Filter out any records older than our 'after' timestamp
+      const filteredResults = allResults.filter(r => r.timestamp.getTime() >= after);
+
+      logger.debug(`Fetched ${filteredResults.length} funding rate records for ${instId} (${allResults.length} total, filtered to time range)`);
+      return filteredResults;
     } catch (error: any) {
       const errorMsg = this.getErrorMessage(error);
       console.error(`Failed to fetch funding history for ${instId}:`, errorMsg);
