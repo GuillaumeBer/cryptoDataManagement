@@ -24,6 +24,63 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
   const initialEventSourceRef = useRef<EventSource | null>(null);
   const incrementalEventSourceRef = useRef<EventSource | null>(null);
 
+  // Reset state and check for ongoing fetches when platform changes
+  useEffect(() => {
+    console.log(`[FRONTEND] Platform changed to: ${platform}, resetting state`);
+
+    // Close any existing connections from previous platform
+    if (initialEventSourceRef.current) {
+      initialEventSourceRef.current.close();
+      initialEventSourceRef.current = null;
+    }
+    if (incrementalEventSourceRef.current) {
+      incrementalEventSourceRef.current.close();
+      incrementalEventSourceRef.current = null;
+    }
+
+    // Reset all state
+    setInitialProgress(null);
+    setIncrementalProgress(null);
+    setInitialFetching(false);
+    setIncrementalFetching(false);
+
+    // After reset, check for ongoing fetches on the new platform
+    const checkOngoingFetch = async () => {
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+        const response = await fetch(`${apiUrl}/status?platform=${platform}`);
+        const statusResponse = await response.json();
+
+        console.log(`[FRONTEND] Status check for ${platform}:`, statusResponse);
+
+        // Extract the actual status data from the API response wrapper
+        const status = statusResponse.data;
+
+        // Reconnect to ongoing initial fetch for this platform
+        if (status?.fetchInProgress?.isInitialFetchInProgress) {
+          console.log(`[FRONTEND] Detected ongoing initial fetch for ${platform}, reconnecting...`);
+          if (status.fetchInProgress.currentProgress) {
+            setInitialProgress(status.fetchInProgress.currentProgress);
+          }
+          connectToInitialFetch();
+        }
+
+        // Reconnect to ongoing incremental fetch for this platform
+        if (status?.fetchInProgress?.isIncrementalFetchInProgress) {
+          console.log(`[FRONTEND] Detected ongoing incremental fetch for ${platform}, reconnecting...`);
+          if (status.fetchInProgress.currentProgress) {
+            setIncrementalProgress(status.fetchInProgress.currentProgress);
+          }
+          connectToIncrementalFetch();
+        }
+      } catch (error) {
+        console.error('[FRONTEND] Failed to check status:', error);
+      }
+    };
+
+    checkOngoingFetch();
+  }, [platform]);
+
   // Connect to initial fetch SSE stream
   const connectToInitialFetch = () => {
     if (initialEventSourceRef.current) {
@@ -144,44 +201,6 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
       });
     };
   };
-
-  // Check for ongoing fetches on component mount
-  useEffect(() => {
-    const checkOngoingFetch = async () => {
-      try {
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-        const response = await fetch(`${apiUrl}/status?platform=${platform}`);
-        const statusResponse = await response.json();
-
-        console.log('[FRONTEND] Status check:', statusResponse);
-
-        // Extract the actual status data from the API response wrapper
-        const status = statusResponse.data;
-
-        // Reconnect to ongoing initial fetch
-        if (status?.fetchInProgress?.isInitialFetchInProgress) {
-          console.log('[FRONTEND] Detected ongoing initial fetch, reconnecting...');
-          if (status.fetchInProgress.currentProgress) {
-            setInitialProgress(status.fetchInProgress.currentProgress);
-          }
-          connectToInitialFetch();
-        }
-
-        // Reconnect to ongoing incremental fetch
-        if (status?.fetchInProgress?.isIncrementalFetchInProgress) {
-          console.log('[FRONTEND] Detected ongoing incremental fetch, reconnecting...');
-          if (status.fetchInProgress.currentProgress) {
-            setIncrementalProgress(status.fetchInProgress.currentProgress);
-          }
-          connectToIncrementalFetch();
-        }
-      } catch (error) {
-        console.error('[FRONTEND] Failed to check status:', error);
-      }
-    };
-
-    checkOngoingFetch();
-  }, [platform]); // Run on mount and when platform changes
 
   // Cleanup event sources on unmount
   useEffect(() => {
