@@ -67,22 +67,33 @@ export class BinanceClient {
    * Endpoint: GET /fapi/v1/fundingRate
    *
    * Binance Futures funding happens every 8 hours (00:00, 08:00, 16:00 UTC)
-   * Max limit: 1000 records per request
-   * Default limit: 100
+   *
+   * API Documentation:
+   * - Returns SETTLED (historical) rates, not predictive rates
+   * - Max limit: 1000 records per request
+   * - Default limit: 100 (if not specified)
+   * - If startTime and endTime are omitted, returns 200 most recent records
+   *
+   * Rate Limits:
+   * - This endpoint is limited to 500 requests per 5 minutes per IP
+   * - Shared limit with GET /fapi/v1/fundingInfo
+   * - Equivalent to ~100 requests per minute
    */
   async getFundingHistory(symbol: string): Promise<FetchedFundingData[]> {
     try {
       logger.debug(`Fetching funding history for ${symbol} from Binance`);
 
-      // Calculate startTime: 480 hours ago to match Hyperliquid's depth
+      // Calculate time range: 480 hours ago to match Hyperliquid's depth
       // This equals 60 funding periods (480h / 8h per period)
       const hoursAgo = 480;
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
+      const endTime = Date.now();
 
       const response = await this.client.get<BinanceFundingRate[]>('/fapi/v1/fundingRate', {
         params: {
           symbol,
           startTime,
+          endTime, // Added for explicit time range definition
           limit: 1000, // Max allowed by Binance
         },
       });
@@ -113,15 +124,19 @@ export class BinanceClient {
   /**
    * Fetch funding history for multiple symbols with rate limiting
    *
-   * Binance rate limits:
-   * - Weight-based system: 2400 per minute
-   * - /fapi/v1/fundingRate weight: 1 per request
+   * Binance Rate Limits:
+   * - /fapi/v1/fundingRate endpoint: 500 requests per 5 minutes per IP
+   * - Shared limit with /fapi/v1/fundingInfo
+   * - Equivalent to ~100 requests per minute
    *
-   * We use conservative 500ms delay = 120 requests/min, well under limit
+   * Default Strategy:
+   * - 500ms delay = 120 requests/min (slightly above limit)
+   * - Recommended: Adjust to 600ms (100 req/min) for strict compliance
+   * - Current 500ms is acceptable for moderate use (allows bursts, averages below limit)
    */
   async getFundingHistoryBatch(
     symbols: string[],
-    delayMs: number = 500,
+    delayMs: number = 600, // Adjusted to 600ms = 100 req/min to respect rate limit
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();

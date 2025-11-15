@@ -50,6 +50,30 @@ export class DataFetcherService extends EventEmitter {
     }
   }
 
+  /**
+   * Get the optimal rate limit delay for each platform
+   * Based on official API rate limits
+   *
+   * - Hyperliquid: 1200 weight/min, fundingHistory ~44 weight → 2500ms delay
+   * - Binance: 500 req / 5 min = 100 req/min → 600ms delay
+   * - Lighter: Unknown (undocumented) → 100ms conservative delay
+   * - Other platforms: 100ms default
+   */
+  private getRateLimitDelay(): number {
+    switch (this.platform) {
+      case 'hyperliquid':
+        return 2500; // 2.5s delay for Hyperliquid's weight-based limit
+      case 'binance':
+        return 600; // 600ms = 100 req/min (respects 500 req / 5 min limit)
+      case 'lighter':
+        return 100; // Conservative, undocumented API
+      case 'aster':
+      case 'edgex':
+      default:
+        return 100;
+    }
+  }
+
   constructor(platform: string = 'hyperliquid') {
     super();
     this.platform = platform.toLowerCase();
@@ -154,7 +178,7 @@ export class DataFetcherService extends EventEmitter {
       const assetSymbols = assets.map((a: any) => a.name || a.symbol);
       const fundingDataMap = await this.platformClient.getFundingHistoryBatch(
         assetSymbols,
-        2500, // 2.5s delay - Rate limit: 1200 weight/min, fundingHistory costs ~44 weight (20 base + ~24 for 480 items)
+        this.getRateLimitDelay(), // Platform-specific rate limit delay
         (currentSymbol: string, processed: number) => {
           // Emit progress event for each asset
           console.log(`[PROGRESS] ${processed}/${assets.length} - Current: ${currentSymbol} (${Math.round((processed / assets.length) * 100)}%)`);
@@ -308,7 +332,7 @@ export class DataFetcherService extends EventEmitter {
       const assetSymbols = assets.map((a) => a.symbol);
       const fundingDataMap = await this.platformClient.getFundingHistoryBatch(
         assetSymbols,
-        2500, // 2.5s delay to respect Hyperliquid rate limits
+        this.getRateLimitDelay(), // Platform-specific rate limit delay
         (currentSymbol: string, processed: number) => {
           // Emit progress event for each asset
           console.log(`[PROGRESS] INCREMENTAL ${processed}/${assets.length} - Current: ${currentSymbol} (${Math.round((processed / assets.length) * 100)}%)`);
