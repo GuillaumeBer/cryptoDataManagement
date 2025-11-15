@@ -179,7 +179,8 @@ export class DataFetcherService extends EventEmitter {
           // Hyperliquid/Binance/Bybit: uses 'name' or 'symbol'
           // OKX: uses 'instId' (e.g., "BTC-USDT-SWAP")
           // DyDx V4: uses 'ticker' (e.g., "BTC-USD")
-          const symbol = a.name || a.symbol || a.instId || a.ticker;
+          // GMX V2: uses 'indexTokenSymbol' (e.g., "BTC-USD")
+          const symbol = a.name || a.symbol || a.instId || a.ticker || a.indexTokenSymbol;
           return {
             symbol,
             platform: this.platform,
@@ -203,8 +204,8 @@ export class DataFetcherService extends EventEmitter {
       this.emit('progress', this.currentProgress);
 
       // Step 2: Fetch funding history for each asset
-      // Handle different property names: Hyperliquid/Binance/Bybit use 'name'/'symbol', OKX uses 'instId', DyDx uses 'ticker'
-      const assetSymbols = assets.map((a: any) => a.name || a.symbol || a.instId || a.ticker);
+      // Handle different property names: Hyperliquid/Binance/Bybit use 'name'/'symbol', OKX uses 'instId', DyDx uses 'ticker', GMX uses 'indexTokenSymbol'
+      const assetSymbols = assets.map((a: any) => a.name || a.symbol || a.instId || a.ticker || a.indexTokenSymbol);
       const fundingDataMap = await this.platformClient.getFundingHistoryBatch(
         assetSymbols,
         this.getRateLimitDelay(), // Platform-specific rate limit delay

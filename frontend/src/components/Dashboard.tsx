@@ -12,7 +12,7 @@ const PLATFORMS: { id: Platform; name: string; enabled: boolean }[] = [
   // DEX Platforms
   { id: 'hyperliquid', name: 'Hyperliquid', enabled: true },
   { id: 'dydx', name: 'DyDx V4', enabled: true },
-  { id: 'gmx', name: 'GMX', enabled: false },
+  { id: 'gmx', name: 'GMX V2', enabled: true },
   { id: 'jupiter', name: 'Jupiter', enabled: false },
   { id: 'aster', name: 'Aster', enabled: false },
   // CEX Platforms

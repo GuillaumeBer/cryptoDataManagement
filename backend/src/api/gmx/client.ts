@@ -3,7 +3,7 @@ import { logger } from '../../utils/logger';
 import {
   GMXMarket,
   GMXMarketsResponse,
-  GMXFundingRateResponse,
+  GMXFundingRateHistoryResponse,
   FetchedFundingData,
 } from './types';
 
@@ -12,10 +12,11 @@ export class GMXClient {
   private baseURL: string;
 
   constructor() {
-    // GMX Stats API base URL
-    // Documentation: https://gmxio.gitbook.io/gmx/
-    // GMX v2 on Arbitrum and Avalanche
-    this.baseURL = process.env.GMX_API_URL || 'https://api.gmx.io';
+    // GMX V2 Synthetics Subgraph on Arbitrum
+    // Documentation: https://docs.gmx.io/docs/api/subgraph
+    this.baseURL =
+      process.env.GMX_SUBGRAPH_URL ||
+      'https://subgraph.satsuma-prod.com/3b2ced13c8d9/gmx/synthetics-arbitrum-stats/api';
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: parseInt(process.env.API_TIMEOUT || '30000'),
@@ -24,7 +25,7 @@ export class GMXClient {
       },
     });
 
-    logger.info('GMX API client initialized', { baseURL: this.baseURL });
+    logger.info('GMX V2 Subgraph API client initialized', { baseURL: this.baseURL });
   }
 
   /**
@@ -41,92 +42,170 @@ export class GMXClient {
   }
 
   /**
-   * Fetch all available perpetual markets from GMX
+   * Fetch all available perpetual markets from GMX V2 on Arbitrum
    *
-   * GMX v2 markets on Arbitrum and Avalanche
-   *
-   * TODO: Implement based on GMX API documentation
-   * - GMX may require on-chain queries or use of their subgraph
-   * - Consider using The Graph for GMX data
-   * - Markets use format like "BTC/USD", "ETH/USD"
+   * Uses GraphQL subgraph query to get market data
+   * Markets are identified by their index token symbol (BTC, ETH, etc.)
    */
   async getAssets(): Promise<GMXMarket[]> {
     try {
-      logger.info('Fetching assets from GMX');
+      logger.info('Fetching perpetual markets from GMX V2 Subgraph');
 
-      // TODO: Replace with actual GMX endpoint or subgraph query
-      // GMX typically requires querying their subgraph on The Graph
-      // Example: Query GMX v2 subgraph for markets
+      const query = `
+        query GetMarkets {
+          markets(first: 1000, where: { marketToken_not: null }) {
+            id
+            marketToken
+            indexToken
+            longToken
+            shortToken
+          }
+        }
+      `;
 
-      logger.warn('GMX markets fetching requires implementation - may need subgraph integration');
-      return [];
+      const response = await this.client.post<GMXMarketsResponse>('', {
+        query,
+      });
 
-      // Placeholder for future implementation:
-      // const response = await this.client.get<GMXMarketsResponse>('/markets');
-      // return response.data.markets;
+      const markets = response.data.data.markets;
+
+      // Add symbol information - extract from token addresses using common mappings
+      const marketsWithSymbols = markets.map((market) => {
+        // Extract symbol from market ID or use a mapping
+        // Common GMX markets: BTC, ETH, LINK, ARB, etc.
+        const symbol = this.extractSymbolFromMarket(market);
+        return {
+          ...market,
+          indexTokenSymbol: symbol,
+        };
+      });
+
+      logger.info(`Fetched ${marketsWithSymbols.length} active perpetual markets from GMX V2`);
+      return marketsWithSymbols;
     } catch (error) {
       const errorMsg = this.getErrorMessage(error);
-      logger.error('Failed to fetch assets from GMX', errorMsg);
-      throw new Error(`Failed to fetch assets: ${errorMsg}`);
+      logger.error('Failed to fetch markets from GMX V2', errorMsg);
+      throw new Error(`Failed to fetch markets: ${errorMsg}`);
     }
+  }
+
+  /**
+   * Extract trading pair symbol from market data
+   * GMX markets are identified by index token addresses
+   */
+  private extractSymbolFromMarket(market: GMXMarket): string {
+    // Common GMX V2 index token addresses on Arbitrum (lowercase, without 0x prefix)
+    const tokenMapping: { [key: string]: string } = {
+      '47904963fc8b2340414262125af65b9118c000': 'BTC',
+      '82af49447d8a07e3bd95bd0d56f35241523fbab1': 'ETH',
+      'f97f4df75117a78c1a5a0dbb814af92458539fb4': 'LINK',
+      '912ce59144191c1204e64559fe8253a0e49e6548': 'ARB',
+      'fa7f8980b0f1e64a2062791cc3b0871572f1f7f0': 'UNI',
+      'fc5a1a6eb076a2c7ad06ed22c90d7e710e35ad0a': 'GMX',
+      'ff970a61a04b1ca14834a43f5de4533ebddb5cc8': 'USDC',
+      'fd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9': 'USDT',
+      '2f2a2543b76a4166549f7aab2e75bef0aefc5b0f': 'WBTC',
+    };
+
+    const indexToken = market.indexToken.toLowerCase().replace('0x', '');
+
+    // Check if we have a known mapping
+    for (const [address, symbol] of Object.entries(tokenMapping)) {
+      if (indexToken === address) {
+        return `${symbol}-USD`;
+      }
+    }
+
+    // Fallback: use market ID
+    return `GMX-MARKET-${market.id.substring(0, 8)}`;
   }
 
   /**
    * Fetch funding rate history for a specific market
    *
-   * GMX funding rates are continuous (not discrete intervals)
-   * - Funding is paid/received every hour
-   * - Rate is calculated based on utilization and borrowing fees
+   * GMX V2 uses hourly funding intervals
+   * Historical depth: 480 hours (480 funding periods at 1h intervals)
    *
-   * TODO: Verify API endpoint and parameters
-   * - GMX may require subgraph queries for historical data
-   * - Consider using The Graph's GMX v2 subgraph
-   * - Historical depth: 480 hours (480 funding periods at 1h intervals)
-   *
-   * Rate Limits:
-   * - TODO: Add actual rate limits (depends on data source - Graph, Stats API, etc.)
+   * Rate Limits: The Graph has generous rate limits for public queries
    */
-  async getFundingHistory(market: string): Promise<FetchedFundingData[]> {
+  async getFundingHistory(marketSymbol: string): Promise<FetchedFundingData[]> {
     try {
-      logger.debug(`Fetching funding history for ${market} from GMX`);
+      logger.debug(`Fetching funding history for ${marketSymbol} from GMX V2`);
 
-      // TODO: Implement actual GMX funding rate fetching
-      // This may require:
-      // 1. Querying GMX subgraph on The Graph
-      // 2. Using GMX Stats API if available
-      // 3. On-chain queries to GMX contracts
+      // Calculate time range (last 480 hours)
+      const hoursAgo = 480;
+      const now = Math.floor(Date.now() / 1000);
+      const startTime = now - hoursAgo * 60 * 60;
 
-      logger.warn('GMX funding history requires implementation - may need subgraph integration');
-      return [];
+      // Query funding fee data from subgraph
+      // Note: GMX uses "borrowing fees" which are equivalent to funding rates
+      const query = `
+        query GetFundingHistory($timestampGte: Int!) {
+          collectedMarketFeesInfos(
+            first: 1000
+            orderBy: timestampGroup
+            orderDirection: desc
+            where: {
+              period: "1h"
+              timestampGroup_gte: $timestampGte
+            }
+          ) {
+            id
+            marketAddress
+            period
+            timestampGroup
+            fundingFeeAmountPerSize
+            cumulativeFundingFeeUsdPerPoolValue
+          }
+        }
+      `;
 
-      // Placeholder for future implementation
+      const response = await this.client.post<GMXFundingRateHistoryResponse>('', {
+        query,
+        variables: {
+          timestampGte: startTime,
+        },
+      });
+
+      const feeInfos = response.data.data.collectedMarketFeesInfos;
+
+      // Convert to our standard format
+      const fundingData: FetchedFundingData[] = feeInfos.map((info) => ({
+        asset: marketSymbol,
+        timestamp: new Date(info.timestampGroup * 1000),
+        fundingRate: info.fundingFeeAmountPerSize || '0',
+        premium: info.cumulativeFundingFeeUsdPerPoolValue || '0',
+      }));
+
+      logger.debug(
+        `Fetched ${fundingData.length} funding rate records for ${marketSymbol} from GMX V2`
+      );
+      return fundingData;
     } catch (error: any) {
       const errorMsg = this.getErrorMessage(error);
-      console.error(`Failed to fetch funding history for ${market}:`, errorMsg);
-      logger.error(`Failed to fetch funding history for ${market}: ${errorMsg}`);
-      throw new Error(`Failed to fetch funding history for ${market}: ${errorMsg}`);
+      logger.error(`Failed to fetch funding history for ${marketSymbol}: ${errorMsg}`);
+      throw new Error(`Failed to fetch funding history for ${marketSymbol}: ${errorMsg}`);
     }
   }
 
   /**
    * Fetch funding history for multiple markets with rate limiting
    *
-   * TODO: Implement when GMX API/subgraph integration is complete
-   * - Default delay: 100ms (placeholder)
+   * Default delay: 200ms between requests to respect subgraph rate limits
    */
   async getFundingHistoryBatch(
     markets: string[],
-    delayMs: number = 100,
+    delayMs: number = 200,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
 
-    logger.info(`Fetching funding history for ${markets.length} assets from GMX`);
+    logger.info(`Fetching funding history for ${markets.length} markets from GMX V2`);
 
     let processed = 0;
     for (const market of markets) {
       try {
-        console.log(`[API] Fetching ${market} from GMX...`);
+        console.log(`[API] Fetching ${market} from GMX V2...`);
         const data = await this.getFundingHistory(market);
         results.set(market, data);
         console.log(`[API] ✓ ${market}: ${data.length} records`);
@@ -155,7 +234,7 @@ export class GMXClient {
       (sum, data) => sum + data.length,
       0
     );
-    logger.info(`Fetched total of ${totalRecords} funding rate records from GMX`);
+    logger.info(`Fetched total of ${totalRecords} funding rate records from GMX V2`);
 
     return results;
   }
