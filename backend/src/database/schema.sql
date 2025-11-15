@@ -3,12 +3,13 @@
 -- Assets table: stores information about perpetual contracts
 CREATE TABLE IF NOT EXISTS assets (
   id SERIAL PRIMARY KEY,
-  symbol VARCHAR(100) UNIQUE NOT NULL,
+  symbol VARCHAR(100) NOT NULL,
   platform VARCHAR(50) NOT NULL,
   name VARCHAR(255),
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
+  updated_at TIMESTAMP DEFAULT NOW(),
+  CONSTRAINT assets_symbol_platform_unique UNIQUE(symbol, platform)
 );
 
 -- Funding rates table: stores funding rate data at various sampling intervals

@@ -20,7 +20,7 @@ export class AssetRepository {
    */
   async findByPlatform(platform: string): Promise<Asset[]> {
     const result = await query<Asset>(
-      'SELECT * FROM assets WHERE platform = $1 ORDER BY symbol',
+      'SELECT * FROM assets WHERE platform = $1 AND is_active = true ORDER BY symbol',
       [platform]
     );
 
@@ -47,7 +47,7 @@ export class AssetRepository {
     const result = await query<Asset>(
       `INSERT INTO assets (symbol, platform, name)
        VALUES ($1, $2, $3)
-       ON CONFLICT (symbol) DO UPDATE
+       ON CONFLICT (symbol, platform) DO UPDATE
        SET name = EXCLUDED.name, updated_at = NOW(), is_active = true
        RETURNING *`,
       [symbol, platform, name || symbol]
@@ -75,13 +75,43 @@ export class AssetRepository {
     const result = await query(
       `INSERT INTO assets (symbol, platform, name)
        VALUES ${values}
-       ON CONFLICT (symbol) DO UPDATE
+       ON CONFLICT (symbol, platform) DO UPDATE
        SET name = EXCLUDED.name, updated_at = NOW(), is_active = true`,
       params
     );
 
     logger.info(`Bulk upserted ${result.rowCount} assets`);
     return result.rowCount || 0;
+  }
+
+  /**
+   * Mark any assets for a platform as inactive if they were not part of the latest sync.
+   */
+  async deactivateMissingSymbols(platform: string, symbols: string[]): Promise<number> {
+    if (symbols.length === 0) {
+      const result = await query(
+        'UPDATE assets SET is_active = false, updated_at = NOW() WHERE platform = $1',
+        [platform]
+      );
+      logger.info(`Deactivated ${result.rowCount || 0} assets for ${platform}`);
+      return result.rowCount || 0;
+    }
+
+    const placeholders = symbols.map((_, idx) => `$${idx + 2}`).join(', ');
+    const params = [platform, ...symbols];
+
+    const result = await query(
+      `UPDATE assets
+       SET is_active = false, updated_at = NOW()
+       WHERE platform = $1 AND symbol NOT IN (${placeholders})`,
+      params
+    );
+
+    const count = result.rowCount || 0;
+    if (count > 0) {
+      logger.info(`Deactivated ${count} assets for ${platform} not present in latest sync`);
+    }
+    return count;
   }
 
   /**

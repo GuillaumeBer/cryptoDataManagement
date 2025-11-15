@@ -157,17 +157,36 @@ export class DataFetcherService extends EventEmitter {
       const assets = await this.platformClient.getAssets();
 
       // Normalize asset data across platforms
-      const normalizedAssets = assets.map((a: any) => {
-        // Handle different property names across platforms
-        // Hyperliquid/Binance/Bybit: uses 'name' or 'symbol'
-        // OKX: uses 'instId' (e.g., "BTC-USDT-SWAP")
-        // DyDx V4: uses 'ticker' (e.g., "BTC-USD")
-        const symbol = a.name || a.symbol || a.instId || a.ticker || a.indexTokenSymbol;
-        return {
-          symbol,
-          platform: this.platform,
-          name: symbol,
-        };
+      const normalizedAssets = assets.flatMap((a: any) => {
+        // Prefer the machine-readable trading symbol for API calls
+        const rawSymbol =
+          a.symbol ??
+          a.instId ??
+          a.ticker ??
+          a.indexTokenSymbol ??
+          a.baseAsset ??
+          a.product_id ??
+          a.name ??
+          '';
+        const symbol = typeof rawSymbol === 'string' ? rawSymbol.trim() : '';
+
+        if (!symbol) {
+          logger.warn(`Skipping asset without symbol for ${this.platform}`, { asset: a });
+          return [];
+        }
+
+        const displayName =
+          (typeof a.name === 'string' && a.name.trim()) ||
+          (typeof a.baseAsset === 'string' && a.baseAsset.trim()) ||
+          symbol;
+
+        return [
+          {
+            symbol,
+            platform: this.platform,
+            name: displayName,
+          },
+        ];
       });
 
       // Deduplicate assets by symbol to avoid "ON CONFLICT DO UPDATE cannot affect row a second time" error
@@ -177,6 +196,10 @@ export class DataFetcherService extends EventEmitter {
 
       logger.info(`Normalized ${assets.length} assets, ${uniqueAssets.length} unique symbols`);
       await AssetRepository.bulkUpsert(uniqueAssets);
+      await AssetRepository.deactivateMissingSymbols(
+        this.platform,
+        uniqueAssets.map((asset) => asset.symbol)
+      );
 
       logger.info(`Stored ${uniqueAssets.length} unique assets in database`);
 
