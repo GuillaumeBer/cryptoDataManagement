@@ -61,10 +61,19 @@ async function runMigrations() {
       const migrationPath = join(migrationsDir, file);
       const migration = readFileSync(migrationPath, 'utf-8');
 
-      const migrationStatements = migration
+      // Remove comment-only lines before splitting by semicolons
+      const cleanedMigration = migration
+        .split('\n')
+        .filter((line) => {
+          const trimmed = line.trim();
+          return trimmed.length > 0 && !trimmed.startsWith('--');
+        })
+        .join('\n');
+
+      const migrationStatements = cleanedMigration
         .split(';')
         .map((s) => s.trim())
-        .filter((s) => s.length > 0 && !s.startsWith('--'));
+        .filter((s) => s.length > 0);
 
       for (const statement of migrationStatements) {
         await query(statement);

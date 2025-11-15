@@ -10,6 +10,7 @@
     "db:prepare": "tsx src/database/prepare-migrations.ts",
     "db:migrate": "tsx src/database/migrate.ts",
     "db:verify": "tsx src/database/verify-schema.ts",
+    "db:fix-symbol": "tsx src/database/fix-symbol-length.ts",
     "db:seed": "tsx src/database/seed.ts",
     "test": "jest",
     "test:watch": "jest --watch",
