@@ -21,6 +21,8 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
   const [incrementalProgress, setIncrementalProgress] = useState<ProgressEvent | null>(null);
   const [initialFetching, setInitialFetching] = useState(false);
   const [incrementalFetching, setIncrementalFetching] = useState(false);
+  const [resampling, setResampling] = useState(false);
+  const [resamplingResult, setResamplingResult] = useState<{ success: boolean; message: string; data?: any } | null>(null);
   const initialEventSourceRef = useRef<EventSource | null>(null);
   const incrementalEventSourceRef = useRef<EventSource | null>(null);
 
@@ -43,6 +45,8 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
     setIncrementalProgress(null);
     setInitialFetching(false);
     setIncrementalFetching(false);
+    setResampling(false);
+    setResamplingResult(null);
 
     // After reset, check for ongoing fetches on the new platform
     const checkOngoingFetch = async () => {
@@ -226,6 +230,34 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
     connectToIncrementalFetch();
   };
 
+  const handleResample = async () => {
+    setResampling(true);
+    setResamplingResult(null);
+
+    try {
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+      const response = await fetch(`${apiUrl}/resample/hyperliquid-8h`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const result = await response.json();
+      setResamplingResult(result);
+
+      // Invalidate queries to refresh the data
+      queryClient.invalidateQueries({ queryKey: ['status'] });
+    } catch (error) {
+      setResamplingResult({
+        success: false,
+        message: `Failed to resample: ${error}`,
+      });
+    } finally {
+      setResampling(false);
+    }
+  };
+
   const renderProgress = (progress: ProgressEvent | null, isFetching: boolean) => {
     if (!progress && !isFetching) return null;
 
@@ -300,7 +332,7 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
     <div className="bg-white rounded-lg shadow p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-4">Data Management</h2>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className={`grid grid-cols-1 ${platform === 'hyperliquid' ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-4`}>
         {/* Initial Fetch */}
         <div className="border border-gray-200 rounded-lg p-4">
           <h3 className="font-medium text-gray-900 mb-2">Initial Fetch</h3>
@@ -309,7 +341,7 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
           </p>
           <button
             onClick={handleInitialFetch}
-            disabled={initialFetching || incrementalFetching}
+            disabled={initialFetching || incrementalFetching || resampling}
             className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             {initialFetching ? 'Fetching...' : 'Fetch Initial Data'}
@@ -326,7 +358,7 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
           </p>
           <button
             onClick={handleIncrementalFetch}
-            disabled={initialFetching || incrementalFetching}
+            disabled={initialFetching || incrementalFetching || resampling}
             className="w-full bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             {incrementalFetching ? 'Updating...' : 'Update Data'}
@@ -334,6 +366,43 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
 
           {renderProgress(incrementalProgress, incrementalFetching)}
         </div>
+
+        {/* Resample to 8h - Only for Hyperliquid */}
+        {platform === 'hyperliquid' && (
+          <div className="border border-gray-200 rounded-lg p-4">
+            <h3 className="font-medium text-gray-900 mb-2">Resample to 8h</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Generate 8-hour aggregated data for cross-platform comparison
+            </p>
+            <button
+              onClick={handleResample}
+              disabled={initialFetching || incrementalFetching || resampling}
+              className="w-full bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            >
+              {resampling ? 'Resampling...' : 'Generate 8h Data'}
+            </button>
+
+            {/* Resampling Result */}
+            {resamplingResult && (
+              <div className={`mt-3 p-3 border rounded ${
+                resamplingResult.success
+                  ? 'bg-green-50 border-green-200'
+                  : 'bg-red-50 border-red-200'
+              }`}>
+                <p className={`text-sm ${
+                  resamplingResult.success ? 'text-green-800' : 'text-red-800'
+                }`}>
+                  {resamplingResult.success ? '✓' : '✗'} {resamplingResult.message}
+                </p>
+                {resamplingResult.data && (
+                  <p className="text-xs text-gray-600 mt-1">
+                    {resamplingResult.data.assetsProcessed} assets processed, {resamplingResult.data.recordsCreated} 8h records created
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
