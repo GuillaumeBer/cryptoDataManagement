@@ -34,9 +34,20 @@ async function runMigrations() {
     const migrationsDir = join(__dirname, 'migrations');
     const migrationFiles = readdirSync(migrationsDir)
       .filter((file) => file.endsWith('.sql'))
-      .sort(); // This will sort 001_*, 002_*, etc. in order
+      .sort(); // This will sort 000_*, 001_*, 002_*, etc. in order
 
     for (const file of migrationFiles) {
+      // Check if migration has already been applied
+      const checkResult = await query(
+        'SELECT migration_name FROM schema_migrations WHERE migration_name = $1',
+        [file]
+      );
+
+      if (checkResult.rows.length > 0) {
+        logger.info(`Skipping already applied migration: ${file}`);
+        continue;
+      }
+
       logger.info(`Running migration: ${file}`);
       const migrationPath = join(migrationsDir, file);
       const migration = readFileSync(migrationPath, 'utf-8');
@@ -49,6 +60,9 @@ async function runMigrations() {
       for (const statement of migrationStatements) {
         await query(statement);
       }
+
+      // Record that this migration has been applied
+      await query('INSERT INTO schema_migrations (migration_name) VALUES ($1)', [file]);
 
       logger.info(`Migration completed: ${file}`);
     }
