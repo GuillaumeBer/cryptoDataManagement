@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
+import { runPromisePool } from '../../utils/promisePool';
 import {
   BybitInstrument,
   BybitInstrumentsResponse,
@@ -187,6 +188,7 @@ export class BybitClient {
   async getFundingHistoryBatch(
     symbols: string[],
     delayMs: number = 600,
+    concurrency: number = 1,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
@@ -194,41 +196,32 @@ export class BybitClient {
     logger.info(`Fetching funding history for ${symbols.length} assets from Bybit`);
 
     let processed = 0;
-    for (const symbol of symbols) {
-      try {
-        console.log(`[API] Fetching ${symbol} from Bybit...`);
-        const data = await this.getFundingHistory(symbol);
-        results.set(symbol, data);
-        console.log(`[API] ✓ ${symbol}: ${data.length} records`);
+    const safeConcurrency = Math.max(1, concurrency);
 
-        processed++;
-        if (onProgress) {
-          onProgress(symbol, processed);
+    await runPromisePool(
+      symbols,
+      async (symbol) => {
+        try {
+          console.log(`[API] Fetching ${symbol} from Bybit...`);
+          const data = await this.getFundingHistory(symbol);
+          results.set(symbol, data);
+          console.log(`[API] ✓ ${symbol}: ${data.length} records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          console.log(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch funding history for ${symbol}`, errorMsg);
+
+          // Store empty array for failed symbols to maintain consistency
+          results.set(symbol, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(symbol, processed);
+          }
         }
-
-        // Rate limiting: wait before next request
-        if (processed < symbols.length && delayMs > 0) {
-          await this.sleep(delayMs);
-        }
-      } catch (error) {
-        const errorMsg = this.getErrorMessage(error);
-        console.log(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
-        logger.error(`Failed to fetch funding history for ${symbol}`, errorMsg);
-
-        // Store empty array for failed symbols to maintain consistency
-        results.set(symbol, []);
-        processed++;
-
-        if (onProgress) {
-          onProgress(symbol, processed);
-        }
-
-        // Continue with delay even after error
-        if (processed < symbols.length && delayMs > 0) {
-          await this.sleep(delayMs);
-        }
-      }
-    }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
 
     const totalRecords = Array.from(results.values()).reduce(
       (sum, data) => sum + data.length,
@@ -237,13 +230,6 @@ export class BybitClient {
     logger.info(`Fetched total of ${totalRecords} funding rate records from Bybit`);
 
     return results;
-  }
-
-  /**
-   * Sleep helper for rate limiting
-   */
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
+import { runPromisePool } from '../../utils/promisePool';
 import {
   DyDxMarket,
   DyDxMarketsResponse,
@@ -194,6 +195,7 @@ export class DyDxClient {
   async getFundingHistoryBatch(
     tickers: string[],
     delayMs: number = 100,
+    concurrency: number = 1,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
@@ -201,41 +203,32 @@ export class DyDxClient {
     logger.info(`Fetching funding history for ${tickers.length} assets from DyDx V4`);
 
     let processed = 0;
-    for (const ticker of tickers) {
-      try {
-        console.log(`[API] Fetching ${ticker} from DyDx V4...`);
-        const data = await this.getFundingHistory(ticker);
-        results.set(ticker, data);
-        console.log(`[API] ✓ ${ticker}: ${data.length} records`);
+    const safeConcurrency = Math.max(1, concurrency);
 
-        processed++;
-        if (onProgress) {
-          onProgress(ticker, processed);
+    await runPromisePool(
+      tickers,
+      async (ticker) => {
+        try {
+          console.log(`[API] Fetching ${ticker} from DyDx V4...`);
+          const data = await this.getFundingHistory(ticker);
+          results.set(ticker, data);
+          console.log(`[API] ✓ ${ticker}: ${data.length} records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          console.log(`[API] ✗ ${ticker}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch funding history for ${ticker}`, errorMsg);
+
+          // Store empty array for failed tickers to maintain consistency
+          results.set(ticker, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(ticker, processed);
+          }
         }
-
-        // Rate limiting: wait before next request
-        if (processed < tickers.length && delayMs > 0) {
-          await this.sleep(delayMs);
-        }
-      } catch (error) {
-        const errorMsg = this.getErrorMessage(error);
-        console.log(`[API] ✗ ${ticker}: FAILED - ${errorMsg}`);
-        logger.error(`Failed to fetch funding history for ${ticker}`, errorMsg);
-
-        // Store empty array for failed tickers to maintain consistency
-        results.set(ticker, []);
-        processed++;
-
-        if (onProgress) {
-          onProgress(ticker, processed);
-        }
-
-        // Continue with delay even after error
-        if (processed < tickers.length && delayMs > 0) {
-          await this.sleep(delayMs);
-        }
-      }
-    }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
 
     const totalRecords = Array.from(results.values()).reduce(
       (sum, data) => sum + data.length,
