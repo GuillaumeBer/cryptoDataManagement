@@ -6,10 +6,10 @@ The Aster Finance integration is implemented but requires the correct API base U
 
 ## Issue
 
-The default endpoint `https://api.asterdex.com` is not resolving (DNS ENOTFOUND error). This could mean:
-- The public API is not yet available
-- A different base URL is required
-- Access requires authentication or whitelisting
+The default endpoint is now configured to `https://fapi.asterdex.com`, which mirrors Binance's futures base URL structure. If the request still fails:
+- Confirm that the Aster public API is available in your region/network
+- Try overriding the base URL via `ASTER_API_URL`
+- Check whether authentication or IP whitelisting is required
 
 ## Documentation
 
@@ -22,7 +22,7 @@ According to the research:
 
 ## Configuration
 
-To use Aster Finance, set the correct base URL in your `.env` file:
+To use Aster Finance, set the base URL in your `.env` file if it differs from the default `https://fapi.asterdex.com`:
 
 ```bash
 ASTER_API_URL=https://your-actual-aster-api-url.com

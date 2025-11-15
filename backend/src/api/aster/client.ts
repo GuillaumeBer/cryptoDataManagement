@@ -15,7 +15,7 @@ export class AsterClient {
     // Aster Finance Futures V3 API
     // Documentation: github.com/asterdex/api-docs
     // Note: API structure is nearly identical to Binance USDM Futures
-    this.baseURL = process.env.ASTER_API_URL || 'https://api.asterdex.com';
+    this.baseURL = this.resolveBaseURL();
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: parseInt(process.env.API_TIMEOUT || '30000'),
@@ -25,6 +25,17 @@ export class AsterClient {
     });
 
     logger.info('Aster Finance Futures V3 API client initialized', { baseURL: this.baseURL });
+  }
+
+  private resolveBaseURL(): string {
+    const envUrl = process.env.ASTER_API_URL?.trim();
+    if (envUrl) {
+      return envUrl;
+    }
+
+    const preferredBaseUrls = ['https://fapi.asterdex.com', 'https://api.asterdex.com'];
+
+    return preferredBaseUrls[0];
   }
 
   /**
