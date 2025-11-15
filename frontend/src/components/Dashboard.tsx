@@ -17,7 +17,7 @@ const PLATFORMS: { id: Platform; name: string; enabled: boolean }[] = [
   { id: 'aster', name: 'Aster', enabled: false },
   // CEX Platforms
   { id: 'binance', name: 'Binance Futures', enabled: true },
-  { id: 'bybit', name: 'Bybit', enabled: false },
+  { id: 'bybit', name: 'Bybit', enabled: true },
   { id: 'okx', name: 'OKX', enabled: false },
 ];
 

@@ -1,19 +1,33 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import {
-  BybitSymbol,
-  BybitExchangeInfo,
-  BybitFundingRateResponse,
+  BybitInstrument,
+  BybitInstrumentsResponse,
+  BybitFundingRateHistoryResponse,
   FetchedFundingData,
 } from './types';
 
+/**
+ * Bybit V5 API Client
+ *
+ * Documentation: https://bybit-exchange.github.io/docs/v5/intro
+ *
+ * Funding Rate Information:
+ * - Bybit uses 8-hour funding intervals (00:00, 08:00, 16:00 UTC)
+ * - Funding rate is settled at these specific times
+ * - Historical funding rate data available via /v5/market/funding/history
+ *
+ * Rate Limits (as of V5 API):
+ * - Public endpoints: 50 requests per 2 seconds per IP
+ * - Equivalent to ~1500 requests per minute
+ * - Conservative delay: 600ms (100 requests/min) to stay well within limits
+ */
 export class BybitClient {
   private client: AxiosInstance;
   private baseURL: string;
 
   constructor() {
-    // Bybit API base URL
-    // Documentation: https://bybit-exchange.github.io/docs/v5/intro
+    // Bybit V5 API base URL
     this.baseURL = process.env.BYBIT_API_URL || 'https://api.bybit.com';
     this.client = axios.create({
       baseURL: this.baseURL,
@@ -23,7 +37,7 @@ export class BybitClient {
       },
     });
 
-    logger.info('Bybit API client initialized', { baseURL: this.baseURL });
+    logger.info('Bybit V5 API client initialized', { baseURL: this.baseURL });
   }
 
   /**
@@ -32,39 +46,52 @@ export class BybitClient {
   private getErrorMessage(error: unknown): string {
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError;
-      return axiosError.response?.data
-        ? `${axiosError.message}: ${JSON.stringify(axiosError.response.data).substring(0, 200)}`
-        : axiosError.message;
+      if (axiosError.response?.data) {
+        const data = axiosError.response.data as any;
+        return `${axiosError.message}: ${data.retMsg || JSON.stringify(data).substring(0, 200)}`;
+      }
+      return axiosError.message;
     }
     return String(error);
   }
 
   /**
-   * Fetch all available perpetual futures from Bybit
-   * Endpoint: GET /v5/market/instruments-info
+   * Fetch all available USDT perpetual contracts from Bybit
    *
-   * TODO: Implement based on Bybit API documentation
-   * - category: 'linear' for USDT perpetuals
-   * - Filter for active trading pairs
+   * Endpoint: GET /v5/market/instruments-info
+   * Documentation: https://bybit-exchange.github.io/docs/v5/market/instrument
+   *
+   * Query Parameters:
+   * - category: "linear" (for USDT perpetual contracts)
+   * - status: "Trading" (optional, to filter active contracts)
+   * - limit: max 1000 (default 500)
+   *
+   * Rate Limit: 50 requests per 2 seconds
    */
-  async getAssets(): Promise<BybitSymbol[]> {
+  async getAssets(): Promise<BybitInstrument[]> {
     try {
-      logger.info('Fetching assets from Bybit');
+      logger.info('Fetching perpetual contracts from Bybit');
 
-      // TODO: Replace with actual Bybit endpoint
-      // Example: GET /v5/market/instruments-info?category=linear
-      const response = await this.client.get<BybitExchangeInfo>('/v5/market/instruments-info', {
+      const response = await this.client.get<BybitInstrumentsResponse>('/v5/market/instruments-info', {
         params: {
-          category: 'linear', // USDT perpetuals
+          category: 'linear', // USDT perpetual contracts
+          limit: 1000, // Get as many as possible in one request
         },
       });
 
-      // TODO: Adjust filtering based on actual response structure
+      // Check if request was successful
+      if (response.data.retCode !== 0) {
+        throw new Error(`Bybit API error: ${response.data.retMsg}`);
+      }
+
+      // Filter for active trading contracts and perpetuals only
       const assets = response.data.result.list.filter(
-        (s) => s.status === 'Trading'
+        (instrument) =>
+          instrument.status === 'Trading' &&
+          instrument.contractType === 'LinearPerpetual'
       );
 
-      logger.info(`Fetched ${assets.length} perpetual assets from Bybit`);
+      logger.info(`Fetched ${assets.length} active perpetual contracts from Bybit`);
       return assets;
     } catch (error) {
       const errorMsg = this.getErrorMessage(error);
@@ -75,37 +102,50 @@ export class BybitClient {
 
   /**
    * Fetch funding rate history for a specific symbol
+   *
    * Endpoint: GET /v5/market/funding/history
+   * Documentation: https://bybit-exchange.github.io/docs/v5/market/history-fund-rate
    *
-   * Bybit Futures funding happens every 8 hours (00:00, 08:00, 16:00 UTC)
+   * Bybit Funding Rate Details:
+   * - Funding occurs every 8 hours at 00:00, 08:00, 16:00 UTC
+   * - Each funding period is 8 hours (480 minutes)
+   * - Historical data: we fetch 480 hours = 60 funding periods
    *
-   * TODO: Verify API endpoint and parameters from official documentation
-   * - Bybit uses symbol format like "BTCUSDT"
-   * - Historical depth: 480 hours (60 funding periods at 8h intervals)
+   * Query Parameters:
+   * - category: "linear" (required)
+   * - symbol: e.g., "BTCUSDT" (required)
+   * - startTime: Unix timestamp in milliseconds (optional)
+   * - endTime: Unix timestamp in milliseconds (optional)
+   * - limit: max 200 records per request (default 200)
    *
-   * Rate Limits:
-   * - TODO: Add actual rate limits from Bybit documentation
+   * Rate Limit: 50 requests per 2 seconds
+   *
+   * Note: If more than 200 records needed, implement pagination
    */
   async getFundingHistory(symbol: string): Promise<FetchedFundingData[]> {
     try {
       logger.debug(`Fetching funding history for ${symbol} from Bybit`);
 
-      // Calculate time range: 480 hours ago
+      // Calculate time range: 480 hours ago to now
+      // This gives us 60 funding periods (8h each)
       const hoursAgo = 480;
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
       const endTime = Date.now();
 
-      // TODO: Replace with actual Bybit endpoint
-      // Example: GET /v5/market/funding/history
-      const response = await this.client.get<BybitFundingRateResponse>('/v5/market/funding/history', {
+      const response = await this.client.get<BybitFundingRateHistoryResponse>('/v5/market/funding/history', {
         params: {
           category: 'linear',
           symbol,
           startTime,
           endTime,
-          limit: 200, // TODO: Verify max limit
+          limit: 200, // Maximum allowed per request
         },
       });
+
+      // Check if request was successful
+      if (response.data.retCode !== 0) {
+        throw new Error(`Bybit API error: ${response.data.retMsg}`);
+      }
 
       const fundingData = response.data.result.list;
       if (!fundingData || !Array.isArray(fundingData)) {
@@ -113,11 +153,12 @@ export class BybitClient {
         return [];
       }
 
+      // Convert to our standard format
       const results: FetchedFundingData[] = fundingData.map((point) => ({
         asset: symbol,
         timestamp: new Date(parseInt(point.fundingRateTimestamp)),
         fundingRate: point.fundingRate,
-        premium: '0', // TODO: Check if Bybit provides premium separately
+        premium: '0', // Bybit doesn't provide premium separately in this endpoint
       }));
 
       logger.debug(`Fetched ${results.length} funding rate records for ${symbol}`);
@@ -133,8 +174,15 @@ export class BybitClient {
   /**
    * Fetch funding history for multiple symbols with rate limiting
    *
-   * TODO: Add actual Bybit rate limits
-   * - Default delay: 600ms (placeholder, adjust based on actual limits)
+   * Rate Limiting Strategy:
+   * - Bybit allows 50 requests per 2 seconds (~1500 req/min)
+   * - We use 600ms delay (100 req/min) to be conservative
+   * - This ensures we stay well within limits even with concurrent requests
+   *
+   * @param symbols - Array of symbol strings (e.g., ["BTCUSDT", "ETHUSDT"])
+   * @param delayMs - Delay between requests in milliseconds (default: 600ms)
+   * @param onProgress - Optional callback for progress tracking
+   * @returns Map of symbol to funding data array
    */
   async getFundingHistoryBatch(
     symbols: string[],
@@ -158,17 +206,26 @@ export class BybitClient {
           onProgress(symbol, processed);
         }
 
-        if (delayMs > 0) {
+        // Rate limiting: wait before next request
+        if (processed < symbols.length && delayMs > 0) {
           await this.sleep(delayMs);
         }
       } catch (error) {
         const errorMsg = this.getErrorMessage(error);
         console.log(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
         logger.error(`Failed to fetch funding history for ${symbol}`, errorMsg);
+
+        // Store empty array for failed symbols to maintain consistency
         results.set(symbol, []);
         processed++;
+
         if (onProgress) {
           onProgress(symbol, processed);
+        }
+
+        // Continue with delay even after error
+        if (processed < symbols.length && delayMs > 0) {
+          await this.sleep(delayMs);
         }
       }
     }
@@ -182,6 +239,9 @@ export class BybitClient {
     return results;
   }
 
+  /**
+   * Sleep helper for rate limiting
+   */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
