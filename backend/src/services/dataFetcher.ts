@@ -2,6 +2,11 @@ import { EventEmitter } from 'events';
 import HyperliquidClient from '../api/hyperliquid/client';
 import AsterClient from '../api/aster/client';
 import BinanceClient from '../api/binance/client';
+import BybitClient from '../api/bybit/client';
+import OKXClient from '../api/okx/client';
+import DyDxClient from '../api/dydx/client';
+import JupiterClient from '../api/jupiter/client';
+import GMXClient from '../api/gmx/client';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
@@ -9,7 +14,7 @@ import { CreateFundingRateParams } from '../models/types';
 import { logger } from '../utils/logger';
 
 // Union type for all platform clients
-type PlatformClient = HyperliquidClient | AsterClient | BinanceClient;
+type PlatformClient = HyperliquidClient | AsterClient | BinanceClient | BybitClient | OKXClient | DyDxClient | JupiterClient | GMXClient;
 
 export interface ProgressEvent {
   type: 'start' | 'progress' | 'complete' | 'error';
@@ -32,13 +37,23 @@ export class DataFetcherService extends EventEmitter {
    * Get the sampling interval for each platform
    * - Hyperliquid: 1h (hourly funding, pays 1/8th of 8h rate each hour)
    * - Binance: 8h (tri-daily funding at 00:00, 08:00, 16:00 UTC)
-   * - Other platforms: 1h (default to hourly)
+   * - Bybit: 8h (tri-daily funding at 00:00, 08:00, 16:00 UTC)
+   * - OKX: 8h (tri-daily funding at 00:00, 08:00, 16:00 UTC)
+   * - DyDx V4: 1h (hourly funding)
+   * - GMX: 1h (continuous funding, paid hourly)
+   * - Jupiter: 1h (placeholder, perpetuals not yet supported)
+   * - Aster: 1h (hourly funding)
    */
   private getSamplingInterval(): string {
     switch (this.platform) {
       case 'binance':
+      case 'bybit':
+      case 'okx':
         return '8h';
       case 'hyperliquid':
+      case 'dydx':
+      case 'gmx':
+      case 'jupiter':
       case 'aster':
       default:
         return '1h';
@@ -51,14 +66,24 @@ export class DataFetcherService extends EventEmitter {
    *
    * - Hyperliquid: 1200 weight/min, fundingHistory ~44 weight → 2500ms delay
    * - Binance: 500 req / 5 min = 100 req/min → 600ms delay
-   * - Other platforms: 100ms default
+   * - Bybit: TODO - verify actual limits → 600ms default
+   * - OKX: TODO - verify actual limits → 600ms default
+   * - DyDx V4: TODO - verify actual limits → 100ms default
+   * - GMX: TODO - depends on data source (subgraph/API) → 100ms default
+   * - Jupiter: TODO - not yet applicable → 100ms default
+   * - Aster: 100ms default
    */
   private getRateLimitDelay(): number {
     switch (this.platform) {
       case 'hyperliquid':
         return 2500; // 2.5s delay for Hyperliquid's weight-based limit
       case 'binance':
-        return 600; // 600ms = 100 req/min (respects 500 req / 5 min limit)
+      case 'bybit':
+      case 'okx':
+        return 600; // 600ms = 100 req/min (placeholder for Bybit/OKX)
+      case 'dydx':
+      case 'gmx':
+      case 'jupiter':
       case 'aster':
       default:
         return 100;
@@ -76,6 +101,21 @@ export class DataFetcherService extends EventEmitter {
         break;
       case 'binance':
         this.platformClient = new BinanceClient();
+        break;
+      case 'bybit':
+        this.platformClient = new BybitClient();
+        break;
+      case 'okx':
+        this.platformClient = new OKXClient();
+        break;
+      case 'dydx':
+        this.platformClient = new DyDxClient();
+        break;
+      case 'gmx':
+        this.platformClient = new GMXClient();
+        break;
+      case 'jupiter':
+        this.platformClient = new JupiterClient();
         break;
       case 'aster':
         this.platformClient = new AsterClient();

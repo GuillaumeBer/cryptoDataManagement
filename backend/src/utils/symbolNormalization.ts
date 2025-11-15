@@ -6,6 +6,11 @@
  * Examples:
  * - Hyperliquid: "BTC" → "BTC"
  * - Binance: "BTCUSDT" → "BTC"
+ * - Bybit: "BTCUSDT" → "BTC"
+ * - OKX: "BTC-USDT-SWAP" → "BTC"
+ * - DyDx V4: "BTC-USD" → "BTC"
+ * - GMX: "BTC/USD" → "BTC"
+ * - Jupiter: "BTC-USDC" → "BTC"
  * - Aster: "BTCUSDT" → "BTC"
  */
 
@@ -60,7 +65,25 @@ export function normalizeSymbol(symbol: string, platform?: string): string {
         // Hyperliquid already uses clean symbols (BTC, ETH, etc.)
         break;
       case 'binance':
-        // Binance uses formats like "BTCUSDT"
+      case 'bybit':
+        // Binance/Bybit use formats like "BTCUSDT"
+        // Already handled by suffix removal
+        break;
+      case 'okx':
+        // OKX uses formats like "BTC-USDT-SWAP"
+        // Remove -SWAP suffix specifically
+        normalized = normalized.replace(/-SWAP$/, '');
+        break;
+      case 'dydx':
+        // DyDx V4 uses formats like "BTC-USD"
+        // Already handled by suffix removal
+        break;
+      case 'gmx':
+        // GMX uses formats like "BTC/USD"
+        // Already handled by suffix removal (/ prefix)
+        break;
+      case 'jupiter':
+        // Jupiter uses formats like "BTC-USDC"
         // Already handled by suffix removal
         break;
       case 'aster':
@@ -91,6 +114,32 @@ export function getSymbolVariations(symbol: string, sourcePlatform?: string): {
     binance: [
       `${normalized}USDT`,
       `${normalized}BUSD`,
+      normalized,
+    ],
+    bybit: [
+      `${normalized}USDT`,
+      `${normalized}USDC`,
+      normalized,
+    ],
+    okx: [
+      `${normalized}-USDT-SWAP`,
+      `${normalized}-USDC-SWAP`,
+      `${normalized}-USD-SWAP`,
+      normalized,
+    ],
+    dydx: [
+      `${normalized}-USD`,
+      `${normalized}-USDC`,
+      normalized,
+    ],
+    gmx: [
+      `${normalized}/USD`,
+      `${normalized}/USDC`,
+      normalized,
+    ],
+    jupiter: [
+      `${normalized}-USDC`,
+      `${normalized}-USDT`,
       normalized,
     ],
     aster: [

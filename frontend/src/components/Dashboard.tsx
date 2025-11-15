@@ -6,12 +6,19 @@ import Analytics from './Analytics';
 import DataFetcher from './DataFetcher';
 import StatusBar from './StatusBar';
 
-type Platform = 'hyperliquid' | 'binance' | 'aster';
+type Platform = 'hyperliquid' | 'binance' | 'bybit' | 'okx' | 'dydx' | 'gmx' | 'jupiter' | 'aster';
 
 const PLATFORMS: { id: Platform; name: string; enabled: boolean }[] = [
+  // DEX Platforms
   { id: 'hyperliquid', name: 'Hyperliquid', enabled: true },
+  { id: 'dydx', name: 'DyDx V4', enabled: false },
+  { id: 'gmx', name: 'GMX', enabled: false },
+  { id: 'jupiter', name: 'Jupiter', enabled: false },
+  { id: 'aster', name: 'Aster', enabled: false },
+  // CEX Platforms
   { id: 'binance', name: 'Binance Futures', enabled: true },
-  { id: 'aster', name: 'Aster', enabled: true },
+  { id: 'bybit', name: 'Bybit', enabled: false },
+  { id: 'okx', name: 'OKX', enabled: false },
 ];
 
 export default function Dashboard() {
