@@ -32,32 +32,47 @@ export class FundingRateRepository {
    */
   async bulkInsert(records: CreateFundingRateParams[]): Promise<number> {
     if (records.length === 0) return 0;
-
-    const values = records
-      .map(
-        (_, i) =>
-          `($${i * 6 + 1}, $${i * 6 + 2}, $${i * 6 + 3}, $${i * 6 + 4}, $${i * 6 + 5}, $${i * 6 + 6})`
-      )
-      .join(', ');
-
-    const params = records.flatMap((r) => [
-      r.asset_id,
-      r.timestamp,
-      r.funding_rate,
-      r.premium,
-      r.platform,
-      r.sampling_interval || '1h',
-    ]);
-
-    const result = await query(
-      `INSERT INTO funding_rates (asset_id, timestamp, funding_rate, premium, platform, sampling_interval)
-       VALUES ${values}
-       ON CONFLICT (asset_id, timestamp, platform, sampling_interval) DO NOTHING`,
-      params
+    const chunkSize = Math.max(
+      1,
+      parseInt(process.env.FUNDING_RATE_INSERT_CHUNK_SIZE || '5000', 10)
     );
+    const chunkCount = Math.ceil(records.length / chunkSize);
+    let inserted = 0;
 
-    const inserted = result.rowCount || 0;
-    logger.info(`Bulk inserted ${inserted} funding rate records`);
+    for (let i = 0; i < records.length; i += chunkSize) {
+      const chunk = records.slice(i, i + chunkSize);
+      const values = chunk
+        .map(
+          (_, idx) =>
+            `($${idx * 6 + 1}, $${idx * 6 + 2}, $${idx * 6 + 3}, $${idx * 6 + 4}, $${idx * 6 + 5}, $${idx * 6 + 6})`
+        )
+        .join(', ');
+
+      const params = chunk.flatMap((r) => [
+        r.asset_id,
+        r.timestamp,
+        r.funding_rate,
+        r.premium,
+        r.platform,
+        r.sampling_interval || '1h',
+      ]);
+
+      const result = await query(
+        `INSERT INTO funding_rates (asset_id, timestamp, funding_rate, premium, platform, sampling_interval)
+         VALUES ${values}
+         ON CONFLICT (asset_id, timestamp, platform, sampling_interval) DO NOTHING`,
+        params
+      );
+
+      const chunkInserted = result.rowCount || 0;
+      inserted += chunkInserted;
+      const chunkNumber = Math.floor(i / chunkSize) + 1;
+      logger.info(
+        `Bulk insert progress: chunk ${chunkNumber}/${chunkCount} inserted ${chunkInserted} records (total ${inserted}/${records.length})`
+      );
+    }
+
+    logger.info(`Bulk inserted ${inserted} funding rate records in ${chunkCount} chunk(s)`);
     return inserted;
   }
 
@@ -128,6 +143,92 @@ export class FundingRateRepository {
     );
 
     return result.rows[0]?.timestamp || null;
+  }
+
+  /**
+   * Get latest timestamps for multiple assets in a single query
+   */
+  async getLatestTimestamps(
+    assetIds: number[],
+    platform: string,
+    samplingInterval: string = '1h'
+  ): Promise<Map<number, Date>> {
+    if (assetIds.length === 0) {
+      return new Map();
+    }
+
+    const result = await query<{ asset_id: number; timestamp: Date }>(
+      `SELECT asset_id, MAX(timestamp) as timestamp
+       FROM funding_rates
+       WHERE asset_id = ANY($1) AND platform = $2 AND sampling_interval = $3
+       GROUP BY asset_id`,
+      [assetIds, platform, samplingInterval]
+    );
+
+    const timestamps = new Map<number, Date>();
+    for (const row of result.rows) {
+      if (row.timestamp) {
+        timestamps.set(row.asset_id, row.timestamp);
+      }
+    }
+
+    return timestamps;
+  }
+
+  /**
+   * Aggregate Hyperliquid hourly data into 8h records directly in SQL
+   */
+  async resampleHyperliquidTo8h(): Promise<{
+    recordsCreated: number;
+    assetsProcessed: number;
+  }> {
+    const result = await query<{ records_created: number; assets_processed: number }>(
+      `WITH hourly AS (
+        SELECT
+          asset_id,
+          date_trunc('hour', timestamp) AS hour_ts,
+          funding_rate::numeric AS funding_rate,
+          COALESCE(premium, '0')::numeric AS premium
+        FROM funding_rates
+        WHERE platform = 'hyperliquid' AND sampling_interval = '1h'
+      ),
+      buckets AS (
+        SELECT
+          asset_id,
+          hour_ts - make_interval(hours => (EXTRACT(HOUR FROM hour_ts)::int % 8)) AS bucket_start,
+          COUNT(DISTINCT hour_ts) AS bucket_count,
+          SUM(funding_rate) AS funding_sum,
+          AVG(premium) AS premium_avg
+        FROM hourly
+        GROUP BY asset_id, bucket_start
+        HAVING COUNT(DISTINCT hour_ts) = 8
+      ),
+      inserted AS (
+        INSERT INTO funding_rates (asset_id, timestamp, funding_rate, premium, platform, sampling_interval)
+        SELECT
+          b.asset_id,
+          b.bucket_start,
+          b.funding_sum,
+          b.premium_avg,
+          'hyperliquid',
+          '8h'
+        FROM buckets b
+        LEFT JOIN funding_rates existing
+          ON existing.asset_id = b.asset_id
+         AND existing.timestamp = b.bucket_start
+         AND existing.platform = 'hyperliquid'
+         AND existing.sampling_interval = '8h'
+        WHERE existing.id IS NULL
+        RETURNING asset_id
+      )
+      SELECT
+        COUNT(*)::int AS records_created,
+        COUNT(DISTINCT asset_id)::int AS assets_processed
+      FROM inserted`
+    );
+
+    const { records_created = 0, assets_processed = 0 } = result.rows[0] || {};
+    return { recordsCreated: records_created, assetsProcessed: assets_processed };
   }
 
   /**

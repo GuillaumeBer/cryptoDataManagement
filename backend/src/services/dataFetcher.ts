@@ -80,6 +80,35 @@ export class DataFetcherService extends EventEmitter {
     }
   }
 
+  /**
+   * Determine concurrency per platform (overridable via env vars)
+   */
+  private getConcurrencyLimit(): number {
+    const envKey = `${this.platform.toUpperCase()}_FETCH_CONCURRENCY`;
+    const envValue = process.env[envKey] || process.env.FETCH_CONCURRENCY;
+
+    if (envValue) {
+      const parsed = parseInt(envValue, 10);
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        return parsed;
+      }
+    }
+
+    switch (this.platform) {
+      case 'hyperliquid':
+        return 2;
+      case 'binance':
+      case 'bybit':
+      case 'okx':
+        return 1;
+      case 'dydx':
+      case 'aster':
+        return 5;
+      default:
+        return 2;
+    }
+  }
+
   constructor(platform: string = 'hyperliquid') {
     super();
     this.platform = platform.toLowerCase();
@@ -191,7 +220,7 @@ export class DataFetcherService extends EventEmitter {
 
       // Deduplicate assets by symbol to avoid "ON CONFLICT DO UPDATE cannot affect row a second time" error
       const uniqueAssets = Array.from(
-        new Map(normalizedAssets.map(asset => [asset.symbol, asset])).values()
+        new Map(normalizedAssets.map((asset) => [asset.symbol, asset])).values()
       );
 
       logger.info(`Normalized ${assets.length} assets, ${uniqueAssets.length} unique symbols`);
@@ -205,7 +234,11 @@ export class DataFetcherService extends EventEmitter {
 
       // Step 2: Fetch funding history for each unique asset
       // Use unique symbols to match what we stored in the database
-      const assetSymbols = uniqueAssets.map(a => a.symbol);
+      const assetSymbols = uniqueAssets.map((a) => a.symbol);
+
+      // Build symbol → assetId map once we have the latest DB snapshot
+      const storedAssets = await AssetRepository.findByPlatform(this.platform);
+      const assetMap = new Map(storedAssets.map((asset) => [asset.symbol, asset.id]));
 
       // Emit start event
       console.log(`[PROGRESS] START: 0/${assetSymbols.length} assets`);
@@ -221,6 +254,7 @@ export class DataFetcherService extends EventEmitter {
       const fundingDataMap = await this.platformClient.getFundingHistoryBatch(
         assetSymbols,
         this.getRateLimitDelay(), // Platform-specific rate limit delay
+        this.getConcurrencyLimit(),
         (currentSymbol: string, processed: number) => {
           // Emit progress event for each asset
           console.log(`[PROGRESS] ${processed}/${assetSymbols.length} - Current: ${currentSymbol} (${Math.round((processed / assetSymbols.length) * 100)}%)`);
@@ -240,14 +274,14 @@ export class DataFetcherService extends EventEmitter {
       // Step 3: Store funding rate data
       for (const [symbol, fundingData] of fundingDataMap.entries()) {
         try {
-          const asset = await AssetRepository.findBySymbol(symbol, this.platform);
-          if (!asset) {
+          const assetId = assetMap.get(symbol);
+          if (!assetId) {
             errors.push(`Asset not found: ${symbol}`);
             continue;
           }
 
           const records: CreateFundingRateParams[] = fundingData.map((fd) => ({
-            asset_id: asset.id,
+            asset_id: assetId,
             timestamp: fd.timestamp,
             funding_rate: fd.fundingRate,
             premium: fd.premium,
@@ -375,6 +409,7 @@ export class DataFetcherService extends EventEmitter {
       const fundingDataMap = await this.platformClient.getFundingHistoryBatch(
         assetSymbols,
         this.getRateLimitDelay(), // Platform-specific rate limit delay
+        this.getConcurrencyLimit(),
         (currentSymbol: string, processed: number) => {
           // Emit progress event for each asset
           console.log(`[PROGRESS] INCREMENTAL ${processed}/${assets.length} - Current: ${currentSymbol} (${Math.round((processed / assets.length) * 100)}%)`);
@@ -391,6 +426,12 @@ export class DataFetcherService extends EventEmitter {
         }
       );
 
+      const latestTimestampMap = await FundingRateRepository.getLatestTimestamps(
+        assets.map((asset) => asset.id),
+        this.platform,
+        this.getSamplingInterval()
+      );
+
       // Store only new records
       for (const asset of assets) {
         try {
@@ -401,11 +442,7 @@ export class DataFetcherService extends EventEmitter {
           }
 
           // Get latest timestamp we have for this asset
-          const latestTimestamp = await FundingRateRepository.getLatestTimestamp(
-            asset.id,
-            this.platform,
-            this.getSamplingInterval()
-          );
+          const latestTimestamp = latestTimestampMap.get(asset.id) || null;
 
           // Filter only new records
           const newRecords = latestTimestamp
@@ -519,93 +556,11 @@ export class DataFetcherService extends EventEmitter {
     let recordsCreated = 0;
 
     try {
-      // Get all Hyperliquid assets
-      const assets = await AssetRepository.findByPlatform('hyperliquid');
+      const { assetsProcessed: processed, recordsCreated: created } =
+        await FundingRateRepository.resampleHyperliquidTo8h();
 
-      for (const asset of assets) {
-        try {
-          // Get all 1h funding rates for this asset
-          const hourlyRates = await FundingRateRepository.find({
-            asset: asset.symbol,
-            platform: 'hyperliquid',
-            sampling_interval: '1h',
-            limit: 100000, // Get all records
-          });
-
-          if (hourlyRates.length === 0) {
-            continue;
-          }
-
-          // Group by 8-hour intervals (aligned to 00:00, 08:00, 16:00 UTC)
-          const eightHourBuckets = new Map<number, typeof hourlyRates>();
-
-          for (const rate of hourlyRates) {
-            const timestamp = new Date(rate.timestamp);
-            const hour = timestamp.getUTCHours();
-
-            // Determine which 8-hour bucket this belongs to
-            let bucketHour: number;
-            if (hour >= 0 && hour < 8) {
-              bucketHour = 0;
-            } else if (hour >= 8 && hour < 16) {
-              bucketHour = 8;
-            } else {
-              bucketHour = 16;
-            }
-
-            // Create bucket timestamp (start of 8-hour period)
-            const bucketTimestamp = new Date(timestamp);
-            bucketTimestamp.setUTCHours(bucketHour, 0, 0, 0);
-            const bucketKey = bucketTimestamp.getTime();
-
-            if (!eightHourBuckets.has(bucketKey)) {
-              eightHourBuckets.set(bucketKey, []);
-            }
-            eightHourBuckets.get(bucketKey)!.push(rate);
-          }
-
-          // Calculate 8-hour rates and insert
-          const resampledRecords: CreateFundingRateParams[] = [];
-
-          for (const [bucketTime, rates] of eightHourBuckets.entries()) {
-            // Only create 8h record if we have all 8 hours of data
-            if (rates.length === 8) {
-              // Sum the 8 hourly rates to get the 8-hour rate
-              const sum8hRate = rates.reduce(
-                (sum, r) => sum + parseFloat(r.funding_rate),
-                0
-              );
-
-              // Average the premium values
-              const avgPremium = rates.reduce(
-                (sum, r) => sum + (r.premium ? parseFloat(r.premium) : 0),
-                0
-              ) / rates.length;
-
-              resampledRecords.push({
-                asset_id: asset.id,
-                timestamp: new Date(bucketTime),
-                funding_rate: sum8hRate.toString(),
-                premium: avgPremium.toString(),
-                platform: 'hyperliquid',
-                sampling_interval: '8h',
-              });
-            }
-          }
-
-          if (resampledRecords.length > 0) {
-            const inserted = await FundingRateRepository.bulkInsert(resampledRecords);
-            recordsCreated += inserted;
-            logger.debug(`Created ${inserted} 8-hour records for ${asset.symbol}`);
-          }
-
-          assetsProcessed++;
-        } catch (error) {
-          const errorMsg = `Failed to resample ${asset.symbol}: ${error}`;
-          logger.error(errorMsg);
-          errors.push(errorMsg);
-        }
-      }
+      assetsProcessed = processed;
+      recordsCreated = created;
 
       logger.info(
         `Resampling completed: ${assetsProcessed} assets, ${recordsCreated} 8-hour records created`

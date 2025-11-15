@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
+import { runPromisePool } from '../../utils/promisePool';
 import {
   BinanceSymbol,
   BinanceExchangeInfo,
@@ -137,6 +138,7 @@ export class BinanceClient {
   async getFundingHistoryBatch(
     symbols: string[],
     delayMs: number = 600, // Adjusted to 600ms = 100 req/min to respect rate limit
+    concurrency: number = 1,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
@@ -144,34 +146,30 @@ export class BinanceClient {
     logger.info(`Fetching funding history for ${symbols.length} assets from Binance Futures`);
 
     let processed = 0;
-    for (const symbol of symbols) {
-      try {
-        console.log(`[API] Fetching ${symbol} from Binance...`);
-        const data = await this.getFundingHistory(symbol);
-        results.set(symbol, data);
-        console.log(`[API] ✓ ${symbol}: ${data.length} records`);
+    const safeConcurrency = Math.max(1, concurrency);
 
-        processed++;
-        // Emit progress callback
-        if (onProgress) {
-          onProgress(symbol, processed);
+    await runPromisePool(
+      symbols,
+      async (symbol) => {
+        try {
+          console.log(`[API] Fetching ${symbol} from Binance...`);
+          const data = await this.getFundingHistory(symbol);
+          results.set(symbol, data);
+          console.log(`[API] ✓ ${symbol}: ${data.length} records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          console.log(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch funding history for ${symbol}`, errorMsg);
+          results.set(symbol, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(symbol, processed);
+          }
         }
-
-        // Add delay to avoid rate limiting
-        if (delayMs > 0) {
-          await this.sleep(delayMs);
-        }
-      } catch (error) {
-        const errorMsg = this.getErrorMessage(error);
-        console.log(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
-        logger.error(`Failed to fetch funding history for ${symbol}`, errorMsg);
-        results.set(symbol, []);
-        processed++;
-        if (onProgress) {
-          onProgress(symbol, processed);
-        }
-      }
-    }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
 
     const totalRecords = Array.from(results.values()).reduce(
       (sum, data) => sum + data.length,
@@ -180,10 +178,6 @@ export class BinanceClient {
     logger.info(`Fetched total of ${totalRecords} funding rate records from Binance Futures`);
 
     return results;
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

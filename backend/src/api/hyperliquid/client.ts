@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import { logger } from '../../utils/logger';
+import { runPromisePool } from '../../utils/promisePool';
 import {
   HyperliquidMetaResponse,
   HyperliquidFundingHistoryResponse,
@@ -95,6 +96,7 @@ export class HyperliquidClient {
   async getFundingHistoryBatch(
     coins: string[],
     delayMs: number = 100,
+    concurrency: number = 1,
     onProgress?: (currentCoin: string, processed: number) => void
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
@@ -102,33 +104,29 @@ export class HyperliquidClient {
     logger.info(`Fetching funding history for ${coins.length} assets`);
 
     let processed = 0;
-    for (const coin of coins) {
-      try {
-        console.log(`[API] Fetching ${coin}...`);
-        const data = await this.getFundingHistory(coin);
-        results.set(coin, data);
-        console.log(`[API] ✓ ${coin}: ${data.length} records`);
+    const safeConcurrency = Math.max(1, concurrency);
 
-        processed++;
-        // Emit progress callback
-        if (onProgress) {
-          onProgress(coin, processed);
+    await runPromisePool(
+      coins,
+      async (coin) => {
+        try {
+          console.log(`[API] Fetching ${coin}...`);
+          const data = await this.getFundingHistory(coin);
+          results.set(coin, data);
+          console.log(`[API] ✓ ${coin}: ${data.length} records`);
+        } catch (error) {
+          console.log(`[API] ✗ ${coin}: FAILED`);
+          logger.error(`Failed to fetch funding history for ${coin}`, error);
+          results.set(coin, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(coin, processed);
+          }
         }
-
-        // Add delay to avoid rate limiting
-        if (delayMs > 0) {
-          await this.sleep(delayMs);
-        }
-      } catch (error) {
-        console.log(`[API] ✗ ${coin}: FAILED`);
-        logger.error(`Failed to fetch funding history for ${coin}`, error);
-        results.set(coin, []);
-        processed++;
-        if (onProgress) {
-          onProgress(coin, processed);
-        }
-      }
-    }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
 
     const totalRecords = Array.from(results.values()).reduce(
       (sum, data) => sum + data.length,
@@ -137,10 +135,6 @@ export class HyperliquidClient {
     logger.info(`Fetched total of ${totalRecords} funding rate records`);
 
     return results;
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

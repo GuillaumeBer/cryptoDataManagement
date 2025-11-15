@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
+import { runPromisePool } from '../../utils/promisePool';
 import {
   OKXInstrument,
   OKXInstrumentsResponse,
@@ -238,6 +239,7 @@ export class OKXClient {
   async getFundingHistoryBatch(
     instIds: string[],
     delayMs: number = 600,
+    concurrency: number = 1,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
@@ -245,41 +247,32 @@ export class OKXClient {
     logger.info(`Fetching funding history for ${instIds.length} assets from OKX`);
 
     let processed = 0;
-    for (const instId of instIds) {
-      try {
-        console.log(`[API] Fetching ${instId} from OKX...`);
-        const data = await this.getFundingHistory(instId);
-        results.set(instId, data);
-        console.log(`[API] ✓ ${instId}: ${data.length} records`);
+    const safeConcurrency = Math.max(1, concurrency);
 
-        processed++;
-        if (onProgress) {
-          onProgress(instId, processed);
+    await runPromisePool(
+      instIds,
+      async (instId) => {
+        try {
+          console.log(`[API] Fetching ${instId} from OKX...`);
+          const data = await this.getFundingHistory(instId);
+          results.set(instId, data);
+          console.log(`[API] ✓ ${instId}: ${data.length} records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          console.log(`[API] ✗ ${instId}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch funding history for ${instId}`, errorMsg);
+
+          // Store empty array for failed instruments to maintain consistency
+          results.set(instId, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(instId, processed);
+          }
         }
-
-        // Rate limiting: wait before next request
-        if (processed < instIds.length && delayMs > 0) {
-          await this.sleep(delayMs);
-        }
-      } catch (error) {
-        const errorMsg = this.getErrorMessage(error);
-        console.log(`[API] ✗ ${instId}: FAILED - ${errorMsg}`);
-        logger.error(`Failed to fetch funding history for ${instId}`, errorMsg);
-
-        // Store empty array for failed instruments to maintain consistency
-        results.set(instId, []);
-        processed++;
-
-        if (onProgress) {
-          onProgress(instId, processed);
-        }
-
-        // Continue with delay even after error
-        if (processed < instIds.length && delayMs > 0) {
-          await this.sleep(delayMs);
-        }
-      }
-    }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
 
     const totalRecords = Array.from(results.values()).reduce(
       (sum, data) => sum + data.length,
