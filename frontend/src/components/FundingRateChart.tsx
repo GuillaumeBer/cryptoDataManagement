@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useFundingRates } from '../hooks/useApi';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts';
 import { formatDate, formatPercentage } from '../utils/formatters';
 
 interface FundingRateChartProps {
@@ -132,6 +132,7 @@ export default function FundingRateChart({ asset, platform }: FundingRateChartPr
               formatter={(value: number) => [`${value.toFixed(4)}%`, 'Funding Rate']}
             />
             <Legend />
+            <ReferenceLine y={0} stroke="#64748b" strokeDasharray="3 3" strokeWidth={2} label={{ value: '0%', position: 'right' }} />
             <Line
               type="monotone"
               dataKey="fundingRate"
