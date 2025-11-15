@@ -25,6 +25,21 @@ export default function Analytics({ asset, platform }: AnalyticsProps) {
     );
   }
 
+  // Handle case when there are no records
+  if (data.total_records === 0) {
+    return (
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">
+          Analytics: {asset}
+        </h2>
+        <p className="text-sm text-gray-500">No funding rate data available for this asset yet.</p>
+        <p className="text-xs text-gray-400 mt-2">
+          Data may still be loading. Please wait for the initial fetch to complete or run an incremental fetch.
+        </p>
+      </div>
+    );
+  }
+
   const positivePercentage = (data.positive_count / data.total_records) * 100;
   const negativePercentage = (data.negative_count / data.total_records) * 100;
 
