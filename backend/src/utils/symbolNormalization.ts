@@ -9,8 +9,6 @@
  * - Bybit: "BTCUSDT" → "BTC"
  * - OKX: "BTC-USDT-SWAP" → "BTC"
  * - DyDx V4: "BTC-USD" → "BTC"
- * - GMX: "BTC/USD" → "BTC"
- * - Jupiter: "BTC-USDC" → "BTC"
  * - Aster: "BTCUSDT" → "BTC"
  */
 
@@ -78,14 +76,6 @@ export function normalizeSymbol(symbol: string, platform?: string): string {
         // DyDx V4 uses formats like "BTC-USD"
         // Already handled by suffix removal
         break;
-      case 'gmx':
-        // GMX uses formats like "BTC/USD"
-        // Already handled by suffix removal (/ prefix)
-        break;
-      case 'jupiter':
-        // Jupiter uses formats like "BTC-USDC"
-        // Already handled by suffix removal
-        break;
       case 'aster':
         // Aster uses formats like "BTCUSDT"
         // Already handled by suffix removal
@@ -130,16 +120,6 @@ export function getSymbolVariations(symbol: string, sourcePlatform?: string): {
     dydx: [
       `${normalized}-USD`,
       `${normalized}-USDC`,
-      normalized,
-    ],
-    gmx: [
-      `${normalized}/USD`,
-      `${normalized}/USDC`,
-      normalized,
-    ],
-    jupiter: [
-      `${normalized}-USDC`,
-      `${normalized}-USDT`,
       normalized,
     ],
     aster: [

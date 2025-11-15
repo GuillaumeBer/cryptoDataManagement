@@ -5,8 +5,6 @@ import BinanceClient from '../api/binance/client';
 import BybitClient from '../api/bybit/client';
 import OKXClient from '../api/okx/client';
 import DyDxClient from '../api/dydx/client';
-import JupiterClient from '../api/jupiter/client';
-import GMXClient from '../api/gmx/client';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
@@ -14,7 +12,7 @@ import { CreateFundingRateParams } from '../models/types';
 import { logger } from '../utils/logger';
 
 // Union type for all platform clients
-type PlatformClient = HyperliquidClient | AsterClient | BinanceClient | BybitClient | OKXClient | DyDxClient | JupiterClient | GMXClient;
+type PlatformClient = HyperliquidClient | AsterClient | BinanceClient | BybitClient | OKXClient | DyDxClient;
 
 export interface ProgressEvent {
   type: 'start' | 'progress' | 'complete' | 'error';
@@ -40,8 +38,6 @@ export class DataFetcherService extends EventEmitter {
    * - Bybit: 8h (tri-daily funding at 00:00, 08:00, 16:00 UTC)
    * - OKX: 8h (tri-daily funding at 00:00, 08:00, 16:00 UTC)
    * - DyDx V4: 1h (hourly funding)
-   * - GMX: 1h (continuous funding, paid hourly)
-   * - Jupiter: 1h (placeholder, perpetuals not yet supported)
    * - Aster: 1h (hourly funding)
    */
   private getSamplingInterval(): string {
@@ -52,8 +48,6 @@ export class DataFetcherService extends EventEmitter {
         return '8h';
       case 'hyperliquid':
       case 'dydx':
-      case 'gmx':
-      case 'jupiter':
       case 'aster':
       default:
         return '1h';
@@ -69,8 +63,6 @@ export class DataFetcherService extends EventEmitter {
    * - Bybit: TODO - verify actual limits → 600ms default
    * - OKX: TODO - verify actual limits → 600ms default
    * - DyDx V4: TODO - verify actual limits → 100ms default
-   * - GMX: TODO - depends on data source (subgraph/API) → 100ms default
-   * - Jupiter: TODO - not yet applicable → 100ms default
    * - Aster: 100ms default
    */
   private getRateLimitDelay(): number {
@@ -82,8 +74,6 @@ export class DataFetcherService extends EventEmitter {
       case 'okx':
         return 600; // 600ms = 100 req/min (placeholder for Bybit/OKX)
       case 'dydx':
-      case 'gmx':
-      case 'jupiter':
       case 'aster':
       default:
         return 100;
@@ -110,12 +100,6 @@ export class DataFetcherService extends EventEmitter {
         break;
       case 'dydx':
         this.platformClient = new DyDxClient();
-        break;
-      case 'gmx':
-        this.platformClient = new GMXClient();
-        break;
-      case 'jupiter':
-        this.platformClient = new JupiterClient();
         break;
       case 'aster':
         this.platformClient = new AsterClient();
@@ -178,7 +162,6 @@ export class DataFetcherService extends EventEmitter {
         // Hyperliquid/Binance/Bybit: uses 'name' or 'symbol'
         // OKX: uses 'instId' (e.g., "BTC-USDT-SWAP")
         // DyDx V4: uses 'ticker' (e.g., "BTC-USD")
-        // GMX V2: uses 'indexTokenSymbol' (e.g., "BTC-USD")
         const symbol = a.name || a.symbol || a.instId || a.ticker || a.indexTokenSymbol;
         return {
           symbol,
@@ -188,7 +171,6 @@ export class DataFetcherService extends EventEmitter {
       });
 
       // Deduplicate assets by symbol to avoid "ON CONFLICT DO UPDATE cannot affect row a second time" error
-      // This is especially important for GMX V2 which has multiple markets per index token
       const uniqueAssets = Array.from(
         new Map(normalizedAssets.map(asset => [asset.symbol, asset])).values()
       );
