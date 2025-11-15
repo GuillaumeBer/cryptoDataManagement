@@ -13,8 +13,8 @@
     "db:fix-symbol": "tsx src/database/fix-symbol-length.ts",
     "db:seed": "tsx src/database/seed.ts",
     "verify:platforms": "tsx src/scripts/verify-platform-data.ts",
-    "test": "jest",
-    "test:watch": "jest --watch",
+    "test": "jest --config ./jest.config.cjs",
+    "test:watch": "jest --watch --config ./jest.config.cjs",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "type-check": "tsc --noEmit"
