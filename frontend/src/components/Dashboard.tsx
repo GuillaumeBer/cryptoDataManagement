@@ -13,8 +13,8 @@ const PLATFORMS: { id: Platform; name: string; enabled: boolean }[] = [
   { id: 'hyperliquid', name: 'Hyperliquid', enabled: true },
   { id: 'dydx', name: 'DyDx V4', enabled: true },
   { id: 'gmx', name: 'GMX V2', enabled: true },
+  { id: 'aster', name: 'Aster Finance', enabled: true },
   { id: 'jupiter', name: 'Jupiter', enabled: false },
-  { id: 'aster', name: 'Aster', enabled: false },
   // CEX Platforms
   { id: 'binance', name: 'Binance Futures', enabled: true },
   { id: 'bybit', name: 'Bybit', enabled: true },

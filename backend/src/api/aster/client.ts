@@ -2,6 +2,7 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import {
   AsterAsset,
+  AsterExchangeInfo,
   AsterFundingRate,
   FetchedFundingData,
 } from './types';
@@ -11,7 +12,9 @@ export class AsterClient {
   private baseURL: string;
 
   constructor() {
-    // Aster API base URL - update this when official endpoint is confirmed
+    // Aster Finance Futures V3 API
+    // Documentation: github.com/asterdex/api-docs
+    // Note: API structure is nearly identical to Binance USDM Futures
     this.baseURL = process.env.ASTER_API_URL || 'https://api.asterdex.com';
     this.client = axios.create({
       baseURL: this.baseURL,
@@ -21,7 +24,7 @@ export class AsterClient {
       },
     });
 
-    logger.info('Aster API client initialized', { baseURL: this.baseURL });
+    logger.info('Aster Finance Futures V3 API client initialized', { baseURL: this.baseURL });
   }
 
   /**
@@ -39,20 +42,21 @@ export class AsterClient {
 
   /**
    * Fetch all available perpetual futures assets from Aster
+   *
+   * Endpoint: /fapi/v1/exchangeInfo (Binance-compatible)
+   * Filters for TRADING status and PERPETUAL contract type
    */
   async getAssets(): Promise<AsterAsset[]> {
     try {
-      logger.info('Fetching assets from Aster');
+      logger.info('Fetching perpetual contracts from Aster Finance Futures');
 
-      // TODO: Update this endpoint based on official Aster API documentation
-      // Reference: https://docs.asterdex.com/product/aster-perpetual-pro/api/api-documentation
-      const response = await this.client.get<{ symbols: AsterAsset[] }>('/api/v1/exchangeInfo');
+      const response = await this.client.get<AsterExchangeInfo>('/fapi/v1/exchangeInfo');
 
       const assets = response.data.symbols.filter(
         (s) => s.status === 'TRADING' && s.contractType === 'PERPETUAL'
       );
 
-      logger.info(`Fetched ${assets.length} assets from Aster`);
+      logger.info(`Fetched ${assets.length} active perpetual contracts from Aster`);
       return assets;
     } catch (error) {
       const errorMsg = this.getErrorMessage(error);
@@ -63,27 +67,43 @@ export class AsterClient {
 
   /**
    * Fetch funding rate history for a specific symbol
-   * Aster uses startTime/endTime parameters and returns data in ascending order
-   * Fixed interest rate: 0.03% per day
+   *
+   * Endpoint: /fapi/v1/fundingRate (Binance-compatible)
+   *
+   * Aster uses hourly funding intervals
+   * Historical depth: 480 hours (480 funding periods at 1h intervals)
+   *
+   * Parameters (all optional):
+   * - symbol: Trading pair (e.g., "BTCUSDT")
+   * - startTime: Start timestamp in milliseconds
+   * - endTime: End timestamp in milliseconds
+   * - limit: Number of results (default 100, max 1000)
+   *
+   * Response format:
+   * [
+   *   {
+   *     "symbol": "BTCUSDT",
+   *     "fundingRate": "0.00010000",
+   *     "fundingTime": 1234567890000,
+   *     "markPrice": "50000.00"
+   *   }
+   * ]
    */
   async getFundingHistory(symbol: string): Promise<FetchedFundingData[]> {
     try {
-      logger.debug(`Fetching funding history for ${symbol}`);
+      logger.debug(`Fetching funding history for ${symbol} from Aster`);
 
-      // Calculate time range: last 20 days
+      // Calculate time range: last 480 hours
+      const hoursAgo = 480;
       const endTime = Date.now();
-      const startTime = endTime - (20 * 24 * 60 * 60 * 1000);
+      const startTime = endTime - hoursAgo * 60 * 60 * 1000;
 
-      // TODO: Update this endpoint based on official Aster API documentation
-      // According to docs: startTime and endTime are inclusive
-      // If number of data between startTime and endTime is larger than limit,
-      // it returns data starting from startTime + limit
-      const response = await this.client.get<AsterFundingRate[]>('/api/v1/fundingRate', {
+      const response = await this.client.get<AsterFundingRate[]>('/fapi/v1/fundingRate', {
         params: {
           symbol,
           startTime,
           endTime,
-          limit: 1000,
+          limit: 1000, // Max limit
         },
       });
 
@@ -97,10 +117,10 @@ export class AsterClient {
         asset: symbol,
         timestamp: new Date(point.fundingTime),
         fundingRate: point.fundingRate,
-        premium: '0', // Aster doesn't provide separate premium data
+        premium: point.markPrice || '0', // Use markPrice as premium if available
       }));
 
-      logger.debug(`Fetched ${results.length} funding rate records for ${symbol}`);
+      logger.debug(`Fetched ${results.length} funding rate records for ${symbol} from Aster`);
       return results;
     } catch (error: any) {
       const errorMsg = this.getErrorMessage(error);
@@ -112,11 +132,13 @@ export class AsterClient {
 
   /**
    * Fetch funding history for multiple symbols with rate limiting
-   * Aster enforces rate limits with 429 errors
+   *
+   * Aster enforces rate limits similar to Binance
+   * Default delay: 200ms between requests to avoid 429 errors
    */
   async getFundingHistoryBatch(
     symbols: string[],
-    delayMs: number = 200, // Higher delay due to potential rate limits
+    delayMs: number = 200,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
