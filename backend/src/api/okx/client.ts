@@ -130,7 +130,6 @@ export class OKXClient {
 
       // Calculate time range based on requested hours
       const after = Date.now() - (hours * 60 * 60 * 1000);
-      const before = Date.now();
 
       // OKX returns data in reverse chronological order (newest first)
       // and limits to 100 records per request
