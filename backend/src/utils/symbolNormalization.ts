@@ -6,7 +6,6 @@
  * Examples:
  * - Hyperliquid: "BTC" → "BTC"
  * - Binance: "BTCUSDT" → "BTC"
- * - Lighter: "BTC-PERP" → "BTC"
  * - Aster: "BTCUSDT" → "BTC"
  * - EdgeX: "BTC-USDT-PERP" → "BTC"
  */
@@ -65,10 +64,6 @@ export function normalizeSymbol(symbol: string, platform?: string): string {
         // Binance uses formats like "BTCUSDT"
         // Already handled by suffix removal
         break;
-      case 'lighter':
-        // Lighter might use formats like "BTC-PERP"
-        normalized = normalized.replace(/-PERP$/, '');
-        break;
       case 'aster':
         // Aster uses formats like "BTCUSDT"
         // Already handled by suffix removal
@@ -102,11 +97,6 @@ export function getSymbolVariations(symbol: string, sourcePlatform?: string): {
       `${normalized}USDT`,
       `${normalized}BUSD`,
       normalized,
-    ],
-    lighter: [
-      normalized,
-      `${normalized}-PERP`,
-      `${normalized}PERP`,
     ],
     aster: [
       normalized,

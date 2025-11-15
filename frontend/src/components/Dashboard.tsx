@@ -6,12 +6,11 @@ import Analytics from './Analytics';
 import DataFetcher from './DataFetcher';
 import StatusBar from './StatusBar';
 
-type Platform = 'hyperliquid' | 'binance' | 'lighter' | 'aster' | 'edgex';
+type Platform = 'hyperliquid' | 'binance' | 'aster' | 'edgex';
 
 const PLATFORMS: { id: Platform; name: string; enabled: boolean }[] = [
   { id: 'hyperliquid', name: 'Hyperliquid', enabled: true },
   { id: 'binance', name: 'Binance Futures', enabled: true },
-  { id: 'lighter', name: 'Lighter', enabled: true },
   { id: 'aster', name: 'Aster', enabled: true },
   { id: 'edgex', name: 'EdgeX', enabled: true },
 ];

@@ -1,6 +1,5 @@
 import { EventEmitter } from 'events';
 import HyperliquidClient from '../api/hyperliquid/client';
-import LighterClient from '../api/lighter/client';
 import AsterClient from '../api/aster/client';
 import EdgeXClient from '../api/edgex/client';
 import BinanceClient from '../api/binance/client';
@@ -11,7 +10,7 @@ import { CreateFundingRateParams } from '../models/types';
 import { logger } from '../utils/logger';
 
 // Union type for all platform clients
-type PlatformClient = HyperliquidClient | LighterClient | AsterClient | EdgeXClient | BinanceClient;
+type PlatformClient = HyperliquidClient | AsterClient | EdgeXClient | BinanceClient;
 
 export interface ProgressEvent {
   type: 'start' | 'progress' | 'complete' | 'error';
@@ -34,7 +33,6 @@ export class DataFetcherService extends EventEmitter {
    * Get the sampling interval for each platform
    * - Hyperliquid: 1h (hourly funding, pays 1/8th of 8h rate each hour)
    * - Binance: 8h (tri-daily funding at 00:00, 08:00, 16:00 UTC)
-   * - Lighter: 1h (hourly funding, TWAP calculation, capped at [-0.5%, +0.5%])
    * - Other platforms: 1h (default to hourly)
    */
   private getSamplingInterval(): string {
@@ -42,7 +40,6 @@ export class DataFetcherService extends EventEmitter {
       case 'binance':
         return '8h';
       case 'hyperliquid':
-      case 'lighter':
       case 'aster':
       case 'edgex':
       default:
@@ -56,7 +53,6 @@ export class DataFetcherService extends EventEmitter {
    *
    * - Hyperliquid: 1200 weight/min, fundingHistory ~44 weight → 2500ms delay
    * - Binance: 500 req / 5 min = 100 req/min → 600ms delay
-   * - Lighter: Unknown (undocumented) → 100ms conservative delay
    * - Other platforms: 100ms default
    */
   private getRateLimitDelay(): number {
@@ -65,8 +61,6 @@ export class DataFetcherService extends EventEmitter {
         return 2500; // 2.5s delay for Hyperliquid's weight-based limit
       case 'binance':
         return 600; // 600ms = 100 req/min (respects 500 req / 5 min limit)
-      case 'lighter':
-        return 100; // Conservative, undocumented API
       case 'aster':
       case 'edgex':
       default:
@@ -85,9 +79,6 @@ export class DataFetcherService extends EventEmitter {
         break;
       case 'binance':
         this.platformClient = new BinanceClient();
-        break;
-      case 'lighter':
-        this.platformClient = new LighterClient();
         break;
       case 'aster':
         this.platformClient = new AsterClient();
