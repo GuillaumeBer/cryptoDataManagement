@@ -11,6 +11,17 @@ interface FundingRateChartProps {
 export default function FundingRateChart({ asset, platform }: FundingRateChartProps) {
   const [dateRange, setDateRange] = useState<'7d' | '14d' | '30d' | 'all'>('7d');
 
+  // Determine appropriate sampling interval based on platform
+  const samplingInterval = useMemo(() => {
+    // Binance, Bybit, OKX use 8h intervals natively
+    if (['binance', 'bybit', 'okx'].includes(platform.toLowerCase())) {
+      return '8h';
+    }
+    // Hyperliquid and others use 1h intervals
+    // Note: Hyperliquid can be resampled to 8h for comparison, but we'll use 1h as default
+    return '1h';
+  }, [platform]);
+
   // Calculate date range - memoize to prevent infinite re-renders
   const { startDate, endDate } = useMemo(() => {
     const end = new Date();
@@ -34,12 +45,20 @@ export default function FundingRateChart({ asset, platform }: FundingRateChartPr
     platform,
     startDate: dateRange !== 'all' ? startDate : undefined,
     endDate,
-    sampling_interval: '8h', // Use 8h interval for smooth data on all platforms
+    sampling_interval: samplingInterval,
     limit: 1000,
   });
 
   // Debug logging
-  console.log('[CHART] Query state:', { isLoading, hasError: !!error, hasData: !!data, dataLength: data?.length });
+  console.log('[CHART] Query state:', {
+    asset,
+    platform,
+    samplingInterval,
+    isLoading,
+    hasError: !!error,
+    hasData: !!data,
+    dataLength: data?.length
+  });
   if (error) {
     console.error('[CHART] Error:', error);
   }
@@ -74,7 +93,12 @@ export default function FundingRateChart({ asset, platform }: FundingRateChartPr
         <h2 className="text-lg font-semibold text-gray-900 mb-4">
           Funding Rate History: {asset}
         </h2>
-        <p className="text-sm text-gray-500">No data available for this asset</p>
+        <p className="text-sm text-gray-500">No data available for this asset on {platform}</p>
+        <p className="text-xs text-gray-400 mt-2">
+          {platform.toLowerCase() === 'binance'
+            ? `Binance uses 8-hour funding intervals. Make sure you've fetched data for ${platform}.`
+            : `This platform uses ${samplingInterval} funding intervals. Make sure you've fetched data for ${platform}.`}
+        </p>
       </div>
     );
   }

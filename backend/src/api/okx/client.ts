@@ -107,7 +107,7 @@ export class OKXClient {
    * OKX Funding Rate Details:
    * - Funding occurs every 8 hours at 00:00, 08:00, 16:00 UTC
    * - Each funding period is 8 hours (480 minutes)
-   * - Historical data: we fetch 480 hours = 60 funding periods
+   * - Historical data: default 480 hours = 60 funding periods
    *
    * Query Parameters:
    * - instId: e.g., "BTC-USDT-SWAP" (required)
@@ -119,36 +119,46 @@ export class OKXClient {
    *
    * Note: OKX uses reverse chronological order (newest first)
    * We need to paginate if more than 100 records are needed
+   *
+   * @param instId - Instrument ID (e.g., "BTC-USDT-SWAP")
+   * @param hours - Number of hours to look back (default: 480 hours = 60 periods)
    */
-  async getFundingHistory(instId: string): Promise<FetchedFundingData[]> {
+  async getFundingHistory(instId: string, hours: number = 480): Promise<FetchedFundingData[]> {
     try {
-      logger.debug(`Fetching funding history for ${instId} from OKX`);
+      logger.debug(`Fetching funding history for ${instId} from OKX (last ${hours} hours)`);
 
-      // Calculate time range: 480 hours ago to now
-      // This gives us 60 funding periods (8h each)
-      const hoursAgo = 480;
-      const after = Date.now() - (hoursAgo * 60 * 60 * 1000);
+      // Calculate time range based on requested hours
+      const after = Date.now() - (hours * 60 * 60 * 1000);
       const before = Date.now();
 
       // OKX returns data in reverse chronological order (newest first)
       // and limits to 100 records per request
-      // We may need multiple requests to get all 60 periods
+      // Calculate expected number of periods (8h each)
+      const expectedPeriods = Math.ceil(hours / 8);
       const allResults: FetchedFundingData[] = [];
-      let currentBefore = before;
+      let currentBefore: number | null = null; // Don't set 'before' on first request
       let hasMore = true;
+      let isFirstRequest = true;
 
       // Fetch up to 100 records at a time until we have enough or no more data
-      while (hasMore && allResults.length < 60) {
-        // Note: OKX API works better with just 'before' parameter for pagination
-        // Using both 'before' and 'after' causes the API to return empty results
+      while (hasMore && allResults.length < expectedPeriods) {
+        // Build request params
+        // Note: OKX doesn't like 'before' on first request - returns empty
+        // Only use 'before' for pagination (subsequent requests)
+        const params: any = {
+          instId,
+          limit: 100,
+        };
+
+        if (!isFirstRequest && currentBefore !== null) {
+          params.before = currentBefore.toString();
+        }
+
         const response = await this.client.get<OKXFundingRateHistoryResponse>('/api/v5/public/funding-rate-history', {
-          params: {
-            instId,
-            before: currentBefore.toString(),
-            // Removed 'after' - causes empty results when combined with 'before'
-            limit: 100,
-          },
+          params,
         });
+
+        isFirstRequest = false;
 
         // Check if request was successful
         if (response.data.code !== '0') {

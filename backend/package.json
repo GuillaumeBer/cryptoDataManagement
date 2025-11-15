@@ -12,6 +12,7 @@
     "db:verify": "tsx src/database/verify-schema.ts",
     "db:fix-symbol": "tsx src/database/fix-symbol-length.ts",
     "db:seed": "tsx src/database/seed.ts",
+    "verify:platforms": "tsx src/scripts/verify-platform-data.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint src --ext .ts",
