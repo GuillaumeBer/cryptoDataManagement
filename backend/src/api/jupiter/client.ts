@@ -2,29 +2,43 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import {
   JupiterMarket,
-  JupiterMarketsResponse,
+  DuneQueryExecutionResponse,
+  DuneQueryResultResponse,
+  DuneBorrowRateRecord,
   FetchedFundingData,
 } from './types';
 
 export class JupiterClient {
-  private client: AxiosInstance;
-  private baseURL: string;
+  private duneClient: AxiosInstance;
+  private duneApiKey: string | undefined;
+  private readonly DUNE_QUERY_ID = 3338148; // Community-validated borrow rate query
+  private readonly MAX_POLL_ATTEMPTS = 30; // Max 30 attempts (30 seconds with 1s delay)
+  private readonly POLL_DELAY_MS = 1000; // 1 second between polls
 
   constructor() {
-    // Jupiter API base URL
-    // Documentation: https://station.jup.ag/docs/apis/swap-api
-    // NOTE: Jupiter is primarily a spot DEX aggregator on Solana
-    // Perpetuals may be available via Jupiter Perps in the future
-    this.baseURL = process.env.JUPITER_API_URL || 'https://api.jup.ag';
-    this.client = axios.create({
-      baseURL: this.baseURL,
-      timeout: parseInt(process.env.API_TIMEOUT || '30000'),
+    // Jupiter Perpetuals uses Dune Analytics for historical borrow rate data
+    // Documentation: See backend/src/api/jupiter/README.md
+    this.duneApiKey = process.env.DUNE_API_KEY;
+
+    this.duneClient = axios.create({
+      baseURL: 'https://api.dune.com/api/v1',
+      timeout: 30000,
       headers: {
         'Content-Type': 'application/json',
+        ...(this.duneApiKey && { 'X-Dune-API-Key': this.duneApiKey }),
       },
     });
 
-    logger.info('Jupiter API client initialized', { baseURL: this.baseURL });
+    if (!this.duneApiKey) {
+      logger.warn(
+        'DUNE_API_KEY not set. Jupiter borrow rate data will not be available. ' +
+          'Get your API key from https://dune.com/settings/api'
+      );
+    } else {
+      logger.info('Jupiter Dune Analytics client initialized', {
+        queryId: this.DUNE_QUERY_ID,
+      });
+    }
   }
 
   /**
@@ -41,25 +55,37 @@ export class JupiterClient {
   }
 
   /**
-   * Fetch all available markets from Jupiter
+   * Fetch available assets from Jupiter Perpetuals
    *
-   * NOTE: Jupiter is primarily a spot trading aggregator
-   * TODO: Update when Jupiter Perps API becomes available
-   * - Check https://station.jup.ag/docs for perpetuals support
-   * - May need to integrate with a different endpoint/protocol
+   * Jupiter uses a single JLP liquidity pool with multiple assets
+   * Common assets: SOL, ETH, BTC, USDC, USDT
+   *
+   * Note: This returns a static list of known assets since there's no
+   * simple API to query available custody accounts
    */
   async getAssets(): Promise<JupiterMarket[]> {
     try {
-      logger.info('Fetching assets from Jupiter');
+      logger.info('Fetching Jupiter Perps assets');
 
-      // TODO: Replace with actual Jupiter Perps endpoint when available
-      // Current Jupiter API is for spot trading
-      logger.warn('Jupiter perpetuals support not yet implemented');
-      return [];
+      if (!this.duneApiKey) {
+        throw new Error(
+          'DUNE_API_KEY required for Jupiter integration. ' +
+            'Set environment variable DUNE_API_KEY or see backend/src/api/jupiter/README.md'
+        );
+      }
 
-      // Placeholder for future implementation:
-      // const response = await this.client.get<JupiterMarketsResponse>('/markets');
-      // return response.data.markets;
+      // Known Jupiter Perps assets in JLP pool
+      // These are the major assets with custody accounts in the pool
+      const knownAssets = [
+        { asset: 'SOL', symbol: 'SOL-USD' },
+        { asset: 'ETH', symbol: 'ETH-USD' },
+        { asset: 'WBTC', symbol: 'BTC-USD' },
+        { asset: 'USDC', symbol: 'USDC' },
+        { asset: 'USDT', symbol: 'USDT' },
+      ];
+
+      logger.info(`Loaded ${knownAssets.length} Jupiter Perps assets`);
+      return knownAssets;
     } catch (error) {
       const errorMsg = this.getErrorMessage(error);
       logger.error('Failed to fetch assets from Jupiter', errorMsg);
@@ -68,53 +94,200 @@ export class JupiterClient {
   }
 
   /**
-   * Fetch funding rate history for a specific market
+   * Execute a Dune Analytics query and wait for results
    *
-   * NOTE: Jupiter is primarily a spot trading aggregator
-   * TODO: Implement when Jupiter Perps API becomes available
-   * - Jupiter may implement perpetuals with funding rates in the future
-   * - Check Jupiter documentation for updates on perps support
-   *
-   * Rate Limits:
-   * - TODO: Add actual rate limits when API is available
+   * @param queryId - The Dune query ID to execute
+   * @returns The query execution results
    */
-  async getFundingHistory(market: string): Promise<FetchedFundingData[]> {
+  private async executeDuneQuery(queryId: number): Promise<DuneQueryResultResponse> {
     try {
-      logger.debug(`Fetching funding history for ${market} from Jupiter`);
+      // Step 1: Start query execution
+      logger.debug(`Executing Dune query ${queryId}`);
+      const executeResponse = await this.duneClient.post<DuneQueryExecutionResponse>(
+        `/query/${queryId}/execute`
+      );
 
-      // TODO: Implement when Jupiter Perps API is available
-      logger.warn('Jupiter perpetuals funding history not yet implemented');
-      return [];
+      const executionId = executeResponse.data.execution_id;
+      logger.debug(`Dune execution started: ${executionId}`);
 
-      // Placeholder for future implementation
-    } catch (error: any) {
+      // Step 2: Poll for completion
+      let attempts = 0;
+      while (attempts < this.MAX_POLL_ATTEMPTS) {
+        await this.sleep(this.POLL_DELAY_MS);
+
+        const statusResponse = await this.duneClient.get<DuneQueryResultResponse>(
+          `/execution/${executionId}/results`
+        );
+
+        const state = statusResponse.data.state;
+        logger.debug(`Dune query state: ${state} (attempt ${attempts + 1}/${this.MAX_POLL_ATTEMPTS})`);
+
+        if (state === 'QUERY_STATE_COMPLETED') {
+          logger.debug(`Dune query completed successfully`);
+          return statusResponse.data;
+        }
+
+        if (state === 'QUERY_STATE_FAILED') {
+          throw new Error('Dune query execution failed');
+        }
+
+        attempts++;
+      }
+
+      throw new Error(`Dune query timeout after ${this.MAX_POLL_ATTEMPTS} attempts`);
+    } catch (error) {
       const errorMsg = this.getErrorMessage(error);
-      console.error(`Failed to fetch funding history for ${market}:`, errorMsg);
-      logger.error(`Failed to fetch funding history for ${market}: ${errorMsg}`);
-      throw new Error(`Failed to fetch funding history for ${market}: ${errorMsg}`);
+      logger.error(`Failed to execute Dune query ${queryId}:`, errorMsg);
+      throw error;
     }
   }
 
   /**
-   * Fetch funding history for multiple markets with rate limiting
+   * Fetch borrow rate history for a specific asset from Jupiter Perps
    *
-   * TODO: Implement when Jupiter Perps API becomes available
+   * Jupiter uses hourly "borrow fees" instead of traditional funding rates
+   * These fees are paid to the JLP liquidity pool based on utilization
+   *
+   * Formula: borrow_rate = utilization_rate × 0.01%
+   *
+   * Data source: Dune Analytics Query 3338148
+   * Historical depth: Limited by Dune query (typically 30-90 days)
+   *
+   * @param asset - Asset symbol (e.g., "SOL", "BTC", "ETH")
+   * @returns Array of borrow rate data points
+   */
+  async getFundingHistory(asset: string): Promise<FetchedFundingData[]> {
+    try {
+      logger.debug(`Fetching borrow rate history for ${asset} from Jupiter (via Dune)`);
+
+      if (!this.duneApiKey) {
+        throw new Error(
+          'DUNE_API_KEY required. Get your API key from https://dune.com/settings/api'
+        );
+      }
+
+      // Execute Dune query to get borrow rates
+      const queryResult = await this.executeDuneQuery(this.DUNE_QUERY_ID);
+
+      if (!queryResult.result || !queryResult.result.rows) {
+        logger.warn(`No borrow rate data returned from Dune for ${asset}`);
+        return [];
+      }
+
+      // Filter rows for this specific asset
+      const assetRecords = queryResult.result.rows.filter(
+        (row: DuneBorrowRateRecord) => row.asset === asset || row.asset === asset.toUpperCase()
+      );
+
+      // Convert to our standard format
+      const results: FetchedFundingData[] = assetRecords.map((record: DuneBorrowRateRecord) => ({
+        asset: asset,
+        timestamp: new Date(record.time),
+        fundingRate: (record.borrow_rate / 100).toString(), // Convert to decimal format
+        premium: record.utilization_rate ? (record.utilization_rate * 100).toString() : '0',
+      }));
+
+      logger.debug(
+        `Fetched ${results.length} borrow rate records for ${asset} from Jupiter (${assetRecords.length} total from Dune)`
+      );
+
+      return results;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch borrow rate history for ${asset}:`, errorMsg);
+      throw new Error(`Failed to fetch borrow rate history for ${asset}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch borrow rate history for multiple assets with rate limiting
+   *
+   * Note: Dune API has rate limits, so we add delays between assets
+   * Rate limit: ~20 requests per minute for free tier
+   *
+   * @param assets - Array of asset symbols
+   * @param delayMs - Delay between requests (default: 3000ms = 3 seconds)
+   * @param onProgress - Optional progress callback
    */
   async getFundingHistoryBatch(
-    markets: string[],
-    delayMs: number = 100,
+    assets: string[],
+    delayMs: number = 3000,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
 
-    logger.info(`Jupiter perpetuals not yet supported - returning empty results for ${markets.length} markets`);
-
-    // Return empty results for all markets
-    for (const market of markets) {
-      results.set(market, []);
+    if (!this.duneApiKey) {
+      logger.error('DUNE_API_KEY not set. Cannot fetch Jupiter borrow rates.');
+      // Return empty results for all assets
+      assets.forEach((asset) => results.set(asset, []));
+      return results;
     }
 
-    return results;
+    logger.info(`Fetching borrow rates for ${assets.length} assets from Jupiter (via Dune)`);
+
+    // Dune query returns all assets at once, so we only need to execute it once
+    try {
+      const queryResult = await this.executeDuneQuery(this.DUNE_QUERY_ID);
+
+      if (!queryResult.result || !queryResult.result.rows) {
+        logger.warn('No borrow rate data returned from Dune');
+        assets.forEach((asset) => results.set(asset, []));
+        return results;
+      }
+
+      // Process each asset from the single query result
+      let processed = 0;
+      for (const asset of assets) {
+        try {
+          console.log(`[API] Processing ${asset} from Dune query results...`);
+
+          // Filter rows for this asset
+          const assetRecords = queryResult.result.rows.filter(
+            (row: DuneBorrowRateRecord) =>
+              row.asset === asset || row.asset === asset.toUpperCase()
+          );
+
+          // Convert to our standard format
+          const data: FetchedFundingData[] = assetRecords.map((record: DuneBorrowRateRecord) => ({
+            asset: asset,
+            timestamp: new Date(record.time),
+            fundingRate: (record.borrow_rate / 100).toString(),
+            premium: record.utilization_rate ? (record.utilization_rate * 100).toString() : '0',
+          }));
+
+          results.set(asset, data);
+          console.log(`[API] ✓ ${asset}: ${data.length} records`);
+
+          processed++;
+          if (onProgress) {
+            onProgress(asset, processed);
+          }
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          console.log(`[API] ✗ ${asset}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to process borrow rates for ${asset}`, errorMsg);
+          results.set(asset, []);
+          processed++;
+          if (onProgress) {
+            onProgress(asset, processed);
+          }
+        }
+      }
+
+      const totalRecords = Array.from(results.values()).reduce(
+        (sum, data) => sum + data.length,
+        0
+      );
+      logger.info(`Processed total of ${totalRecords} borrow rate records from Jupiter`);
+
+      return results;
+    } catch (error) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error('Failed to fetch Dune query for Jupiter borrow rates:', errorMsg);
+      // Return empty results for all assets on error
+      assets.forEach((asset) => results.set(asset, []));
+      return results;
+    }
   }
 
   private sleep(ms: number): Promise<void> {
