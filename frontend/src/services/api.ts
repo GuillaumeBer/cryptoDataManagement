@@ -58,6 +58,7 @@ class ApiClient {
     startDate?: Date;
     endDate?: Date;
     platform?: string;
+    sampling_interval?: string;
     limit?: number;
     offset?: number;
   }): Promise<FundingRate[]> {

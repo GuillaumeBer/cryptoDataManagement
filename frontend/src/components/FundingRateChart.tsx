@@ -34,6 +34,7 @@ export default function FundingRateChart({ asset, platform }: FundingRateChartPr
     platform,
     startDate: dateRange !== 'all' ? startDate : undefined,
     endDate,
+    sampling_interval: '8h', // Use 8h interval for smooth data on all platforms
     limit: 1000,
   });
 
@@ -91,7 +92,7 @@ export default function FundingRateChart({ asset, platform }: FundingRateChartPr
     <div className="bg-white rounded-lg shadow p-6">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-lg font-semibold text-gray-900">
-          Funding Rate History: {asset}
+          Funding Rate History: {asset} <span className="text-sm font-normal text-gray-500">(8-hour intervals)</span>
         </h2>
 
         {/* Date Range Selector */}

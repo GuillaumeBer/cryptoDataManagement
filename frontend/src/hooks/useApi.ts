@@ -24,6 +24,7 @@ export function useFundingRates(params: {
   startDate?: Date;
   endDate?: Date;
   platform?: string;
+  sampling_interval?: string;
   limit?: number;
   offset?: number;
 }) {
