@@ -176,7 +176,9 @@ export class DataFetcherService extends EventEmitter {
       await AssetRepository.bulkUpsert(
         assets.map((a: any) => {
           // Handle different property names across platforms
-          const symbol = a.name || a.symbol;
+          // Hyperliquid/Binance/Bybit: uses 'name' or 'symbol'
+          // OKX: uses 'instId' (e.g., "BTC-USDT-SWAP")
+          const symbol = a.name || a.symbol || a.instId;
           return {
             symbol,
             platform: this.platform,
@@ -200,7 +202,8 @@ export class DataFetcherService extends EventEmitter {
       this.emit('progress', this.currentProgress);
 
       // Step 2: Fetch funding history for each asset
-      const assetSymbols = assets.map((a: any) => a.name || a.symbol);
+      // Handle different property names: Hyperliquid/Binance/Bybit use 'name'/'symbol', OKX uses 'instId'
+      const assetSymbols = assets.map((a: any) => a.name || a.symbol || a.instId);
       const fundingDataMap = await this.platformClient.getFundingHistoryBatch(
         assetSymbols,
         this.getRateLimitDelay(), // Platform-specific rate limit delay
