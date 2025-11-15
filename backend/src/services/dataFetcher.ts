@@ -32,8 +32,9 @@ export class DataFetcherService extends EventEmitter {
 
   /**
    * Get the sampling interval for each platform
-   * - Hyperliquid: 1h (hourly funding)
+   * - Hyperliquid: 1h (hourly funding, pays 1/8th of 8h rate each hour)
    * - Binance: 8h (tri-daily funding at 00:00, 08:00, 16:00 UTC)
+   * - Lighter: 1h (hourly funding, TWAP calculation, capped at [-0.5%, +0.5%])
    * - Other platforms: 1h (default to hourly)
    */
   private getSamplingInterval(): string {

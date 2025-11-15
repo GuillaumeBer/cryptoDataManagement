@@ -8,10 +8,14 @@ export interface LighterAsset {
 }
 
 export interface LighterFundingRate {
-  symbol: string;
-  fundingRate: string;
-  fundingTime: number; // Unix timestamp in milliseconds
+  symbol?: string;
+  market_id?: string;
+  fundingRate?: string;
+  rate?: string; // Alternative field name
+  fundingTime?: number; // Unix timestamp in milliseconds
+  timestamp?: number; // Alternative field name
   markPrice?: string;
+  premium?: string; // May be provided separately
 }
 
 export interface FetchedFundingData {
