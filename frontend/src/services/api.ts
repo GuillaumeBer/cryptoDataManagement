@@ -22,6 +22,10 @@ class ApiClient {
     });
   }
 
+  getBaseUrl() {
+    return this.client.defaults.baseURL ?? '';
+  }
+
   // System endpoints
   async getStatus(platform?: string): Promise<SystemStatus> {
     const params = platform ? { platform } : {};
@@ -43,6 +47,11 @@ class ApiClient {
   async triggerIncrementalFetch(): Promise<FetchResult> {
     const response = await this.client.post<ApiResponse<FetchResult>>('/fetch/incremental');
     return response.data.data!;
+  }
+
+  async resampleHyperliquid(): Promise<{ success: boolean; message?: string }> {
+    const response = await this.client.post('/resample/hyperliquid-8h');
+    return response.data;
   }
 
   // Asset endpoints

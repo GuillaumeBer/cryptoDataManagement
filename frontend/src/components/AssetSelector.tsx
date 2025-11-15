@@ -3,12 +3,16 @@ import type { Asset } from '../types';
 
 interface AssetSelectorProps {
   assets: Asset[];
+  isLoading?: boolean;
+  error?: unknown;
   selectedAsset: string | null;
   onSelectAsset: (symbol: string | null) => void;
 }
 
 export default function AssetSelector({
   assets,
+  isLoading,
+  error,
   selectedAsset,
   onSelectAsset,
 }: AssetSelectorProps) {
@@ -22,7 +26,15 @@ export default function AssetSelector({
     <div className="bg-white rounded-lg shadow p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-4">Select Asset</h2>
 
-      {assets.length === 0 ? (
+      {isLoading ? (
+        <div className="text-center py-8">
+          <p className="text-sm text-gray-500">Loading assets...</p>
+        </div>
+      ) : error ? (
+        <div className="text-center py-8">
+          <p className="text-sm text-red-600">Failed to load assets.</p>
+        </div>
+      ) : assets.length === 0 ? (
         <div className="text-center py-8">
           <p className="text-sm text-gray-500">
             No assets available. Click "Fetch Initial Data" to load assets.
