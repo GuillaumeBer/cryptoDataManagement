@@ -11,7 +11,7 @@ type Platform = 'hyperliquid' | 'binance' | 'bybit' | 'okx' | 'dydx' | 'gmx' | '
 const PLATFORMS: { id: Platform; name: string; enabled: boolean }[] = [
   // DEX Platforms
   { id: 'hyperliquid', name: 'Hyperliquid', enabled: true },
-  { id: 'dydx', name: 'DyDx V4', enabled: false },
+  { id: 'dydx', name: 'DyDx V4', enabled: true },
   { id: 'gmx', name: 'GMX', enabled: false },
   { id: 'jupiter', name: 'Jupiter', enabled: false },
   { id: 'aster', name: 'Aster', enabled: false },
