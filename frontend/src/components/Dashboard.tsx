@@ -6,13 +6,15 @@ import Analytics from './Analytics';
 import DataFetcher from './DataFetcher';
 import StatusBar from './StatusBar';
 
-type Platform = 'hyperliquid' | 'binance' | 'bybit' | 'okx' | 'dydx' | 'aster';
+type Platform = 'hyperliquid' | 'binance' | 'bybit' | 'okx' | 'dydx' | 'gmx' | 'jupiter' | 'aster';
 
 const PLATFORMS: { id: Platform; name: string; enabled: boolean }[] = [
   // DEX Platforms
   { id: 'hyperliquid', name: 'Hyperliquid', enabled: true },
   { id: 'dydx', name: 'DyDx V4', enabled: true },
-  { id: 'aster', name: 'Aster Finance (Config Required)', enabled: false },
+  { id: 'gmx', name: 'GMX V2', enabled: true },
+  { id: 'jupiter', name: 'Jupiter (Dune API Required)', enabled: true },
+  { id: 'aster', name: 'Aster Finance (Config Required)', enabled: true },
   // CEX Platforms
   { id: 'binance', name: 'Binance Futures', enabled: true },
   { id: 'bybit', name: 'Bybit', enabled: true },
