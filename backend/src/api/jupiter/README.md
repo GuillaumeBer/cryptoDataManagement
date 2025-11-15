@@ -131,20 +131,44 @@ These services **DO NOT** provide Jupiter borrow rate data:
 
 ## Current Implementation Status
 
-The Jupiter client is implemented as a **placeholder** because:
-1. No simple REST API exists for Jupiter borrow rates
-2. Requires either:
-   - Paid Dune Analytics subscription, OR
-   - Complex Solana RPC + blockchain indexing infrastructure
-3. Fundamentally different data model than other platforms
+✅ **Fully Implemented** via Dune Analytics API:
+1. Historical borrow rate retrieval using Query 3338148
+2. Automated polling for async query execution
+3. Data transformation to standard funding rate format
+4. Support for all major Jupiter assets (SOL, ETH, WBTC, USDC, USDT)
+5. Graceful degradation if API key not configured
 
-## How to Enable Jupiter Integration
+## Configuration
 
-### Option A: Dune Analytics (Recommended)
+✅ **Jupiter integration is fully implemented!** Follow these steps to enable it:
+
+1. **Sign up for Dune Analytics**: https://dune.com
+2. **Get your API key**: https://dune.com/settings/api
+3. **Add to .env file** (recommended):
+   ```bash
+   # In backend/.env
+   DUNE_API_KEY=your_dune_api_key_here
+   ```
+
+   Or **set environment variable**:
+   ```bash
+   export DUNE_API_KEY=your_dune_api_key_here
+   ```
+4. **Restart the backend server**
+
+The implementation automatically:
+- Fetches historical borrow rates via Dune Query 3338148
+- Transforms data to match the standard funding rate format
+- Supports all known Jupiter assets (SOL, ETH, WBTC, USDC, USDT)
+- Handles polling for async query execution
+
+## How to Enable Jupiter Integration (Advanced Options)
+
+### Option A: Dune Analytics (✅ Implemented)
 1. Sign up for Dune Analytics
-2. Get API key
-3. Implement adapter to fetch Query 3338148 results
-4. Transform Dune data to match our `FetchedFundingData` format
+2. Get API key (as described above)
+3. Add to .env file
+4. Data fetching works automatically
 
 ### Option B: Solana RPC (Advanced)
 1. Set up Solana RPC access (Helius/QuickNode)
