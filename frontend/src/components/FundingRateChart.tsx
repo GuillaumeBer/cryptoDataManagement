@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useFundingRates } from '../hooks/useApi';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts';
-import { formatDate, formatPercentage } from '../utils/formatters';
+import { formatDate } from '../utils/formatters';
 
 interface FundingRateChartProps {
   asset: string;
@@ -48,20 +48,6 @@ export default function FundingRateChart({ asset, platform }: FundingRateChartPr
     sampling_interval: samplingInterval,
     limit: 1000,
   });
-
-  // Debug logging
-  console.log('[CHART] Query state:', {
-    asset,
-    platform,
-    samplingInterval,
-    isLoading,
-    hasError: !!error,
-    hasData: !!data,
-    dataLength: data?.length
-  });
-  if (error) {
-    console.error('[CHART] Error:', error);
-  }
 
   if (isLoading) {
     return (

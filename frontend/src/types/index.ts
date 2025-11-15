@@ -22,6 +22,22 @@ export interface FundingRate {
   asset_name: string | null;
 }
 
+export interface ProgressEvent {
+  type: 'start' | 'progress' | 'complete' | 'error';
+  totalAssets: number;
+  processedAssets: number;
+  currentAsset?: string;
+  recordsFetched: number;
+  errors: string[];
+  percentage: number;
+}
+
+export interface FetchInProgressState {
+  isInitialFetchInProgress: boolean;
+  isIncrementalFetchInProgress: boolean;
+  currentProgress?: ProgressEvent;
+}
+
 export interface SystemStatus {
   platform: string;
   assetCount: number;
@@ -32,6 +48,7 @@ export interface SystemStatus {
     recordsFetched: number;
     assetsProcessed: number;
   } | null;
+  fetchInProgress?: FetchInProgressState;
 }
 
 export interface FetchResult {

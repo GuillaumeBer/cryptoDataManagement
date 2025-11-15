@@ -3,10 +3,12 @@ import { formatLargeNumber, formatRelativeTime } from '../utils/formatters';
 
 interface StatusBarProps {
   status?: SystemStatus;
+  isLoading?: boolean;
+  error?: unknown;
 }
 
-export default function StatusBar({ status }: StatusBarProps) {
-  if (!status) {
+export default function StatusBar({ status, isLoading, error }: StatusBarProps) {
+  if (isLoading) {
     return (
       <div className="bg-gray-100 border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
@@ -14,6 +16,20 @@ export default function StatusBar({ status }: StatusBarProps) {
         </div>
       </div>
     );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border-b border-red-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+          <p className="text-sm text-red-700">Failed to load status.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!status) {
+    return null;
   }
 
   return (

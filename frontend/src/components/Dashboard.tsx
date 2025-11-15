@@ -22,8 +22,16 @@ const PLATFORMS: { id: Platform; name: string; enabled: boolean }[] = [
 export default function Dashboard() {
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('hyperliquid');
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
-  const { data: status } = useSystemStatus(selectedPlatform);
-  const { data: assets } = useAssets(selectedPlatform);
+  const {
+    data: status,
+    isLoading: isStatusLoading,
+    error: statusError,
+  } = useSystemStatus(selectedPlatform);
+  const {
+    data: assets,
+    isLoading: isAssetsLoading,
+    error: assetsError,
+  } = useAssets(selectedPlatform);
 
   // Reset selected asset when switching platforms
   const handlePlatformChange = (platform: Platform) => {
@@ -46,7 +54,7 @@ export default function Dashboard() {
       </header>
 
       {/* Status Bar */}
-      <StatusBar status={status} />
+      <StatusBar status={status} isLoading={isStatusLoading} error={statusError} />
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -83,13 +91,15 @@ export default function Dashboard() {
 
         {/* Data Fetcher Section */}
         <div className="mb-8">
-          <DataFetcher platform={selectedPlatform} />
+          <DataFetcher platform={selectedPlatform} selectedAsset={selectedAsset} />
         </div>
 
         {/* Asset Selection */}
         <div className="mb-8">
           <AssetSelector
             assets={assets || []}
+            isLoading={isAssetsLoading}
+            error={assetsError}
             selectedAsset={selectedAsset}
             onSelectAsset={setSelectedAsset}
           />
