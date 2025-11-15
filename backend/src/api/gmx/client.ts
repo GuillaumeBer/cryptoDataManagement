@@ -63,9 +63,34 @@ export class GMXClient {
         }
       `;
 
-      const response = await this.client.post<GMXMarketsResponse>('', {
+      const response = await this.client.post<any>('', {
         query,
       });
+
+      // Debug logging to see the response structure
+      logger.debug('GMX GraphQL response:', {
+        status: response.status,
+        hasData: !!response.data,
+        dataKeys: response.data ? Object.keys(response.data) : [],
+        sample: JSON.stringify(response.data).substring(0, 500)
+      });
+
+      // Check for GraphQL errors
+      if (response.data.errors) {
+        logger.error('GMX GraphQL errors:', response.data.errors);
+        throw new Error(`GMX subgraph error: ${JSON.stringify(response.data.errors)}`);
+      }
+
+      // Check if response has the expected structure
+      if (!response.data || !response.data.data) {
+        logger.error('Unexpected GMX response structure:', response.data);
+        throw new Error(`Invalid response from GMX subgraph. Expected data.data, got: ${Object.keys(response.data || {}).join(', ')}`);
+      }
+
+      if (!response.data.data.markets) {
+        logger.error('No markets in GMX response:', response.data.data);
+        throw new Error('No markets found in GMX subgraph response');
+      }
 
       const markets = response.data.data.markets;
 
