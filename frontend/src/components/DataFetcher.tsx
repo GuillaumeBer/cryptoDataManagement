@@ -17,36 +17,26 @@ interface DataFetcherProps {
 
 export default function DataFetcher({ platform }: DataFetcherProps) {
   const queryClient = useQueryClient();
-  const [initialProgress, setInitialProgress] = useState<ProgressEvent | null>(null);
-  const [incrementalProgress, setIncrementalProgress] = useState<ProgressEvent | null>(null);
-  const [initialFetching, setInitialFetching] = useState(false);
-  const [incrementalFetching, setIncrementalFetching] = useState(false);
+  const [progress, setProgress] = useState<ProgressEvent | null>(null);
+  const [fetching, setFetching] = useState(false);
   const [resampling, setResampling] = useState(false);
-  const [resamplingResult, setResamplingResult] = useState<{ success: boolean; message: string; data?: any } | null>(null);
-  const initialEventSourceRef = useRef<EventSource | null>(null);
-  const incrementalEventSourceRef = useRef<EventSource | null>(null);
+  const [fetchType, setFetchType] = useState<'initial' | 'incremental'>('initial');
+  const eventSourceRef = useRef<EventSource | null>(null);
 
   // Reset state and check for ongoing fetches when platform changes
   useEffect(() => {
     console.log(`[FRONTEND] Platform changed to: ${platform}, resetting state`);
 
     // Close any existing connections from previous platform
-    if (initialEventSourceRef.current) {
-      initialEventSourceRef.current.close();
-      initialEventSourceRef.current = null;
-    }
-    if (incrementalEventSourceRef.current) {
-      incrementalEventSourceRef.current.close();
-      incrementalEventSourceRef.current = null;
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
     }
 
     // Reset all state
-    setInitialProgress(null);
-    setIncrementalProgress(null);
-    setInitialFetching(false);
-    setIncrementalFetching(false);
+    setProgress(null);
+    setFetching(false);
     setResampling(false);
-    setResamplingResult(null);
 
     // After reset, check for ongoing fetches on the new platform
     const checkOngoingFetch = async () => {
@@ -60,22 +50,15 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
         // Extract the actual status data from the API response wrapper
         const status = statusResponse.data;
 
-        // Reconnect to ongoing initial fetch for this platform
-        if (status?.fetchInProgress?.isInitialFetchInProgress) {
-          console.log(`[FRONTEND] Detected ongoing initial fetch for ${platform}, reconnecting...`);
+        // Reconnect to ongoing fetch for this platform (either initial or incremental)
+        if (status?.fetchInProgress?.isInitialFetchInProgress || status?.fetchInProgress?.isIncrementalFetchInProgress) {
+          const type = status.fetchInProgress.isInitialFetchInProgress ? 'initial' : 'incremental';
+          console.log(`[FRONTEND] Detected ongoing ${type} fetch for ${platform}, reconnecting...`);
           if (status.fetchInProgress.currentProgress) {
-            setInitialProgress(status.fetchInProgress.currentProgress);
+            setProgress(status.fetchInProgress.currentProgress);
           }
-          connectToInitialFetch();
-        }
-
-        // Reconnect to ongoing incremental fetch for this platform
-        if (status?.fetchInProgress?.isIncrementalFetchInProgress) {
-          console.log(`[FRONTEND] Detected ongoing incremental fetch for ${platform}, reconnecting...`);
-          if (status.fetchInProgress.currentProgress) {
-            setIncrementalProgress(status.fetchInProgress.currentProgress);
-          }
-          connectToIncrementalFetch();
+          setFetchType(type);
+          connectToFetch(type);
         }
       } catch (error) {
         console.error('[FRONTEND] Failed to check status:', error);
@@ -85,24 +68,26 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
     checkOngoingFetch();
   }, [platform]);
 
-  // Connect to initial fetch SSE stream
-  const connectToInitialFetch = () => {
-    if (initialEventSourceRef.current) {
-      initialEventSourceRef.current.close();
+  // Connect to fetch SSE stream (either initial or incremental)
+  const connectToFetch = (type: 'initial' | 'incremental') => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
     }
 
-    setInitialFetching(true);
+    setFetching(true);
+    setFetchType(type);
 
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-    console.log('[FRONTEND] Opening EventSource:', `${apiUrl}/fetch/stream?platform=${platform}`);
-    const eventSource = new EventSource(`${apiUrl}/fetch/stream?platform=${platform}`);
-    initialEventSourceRef.current = eventSource;
+    const endpoint = type === 'initial' ? 'fetch/stream' : 'fetch/incremental/stream';
+    console.log('[FRONTEND] Opening EventSource:', `${apiUrl}/${endpoint}?platform=${platform}`);
+    const eventSource = new EventSource(`${apiUrl}/${endpoint}?platform=${platform}`);
+    eventSourceRef.current = eventSource;
 
     eventSource.onopen = () => {
       console.log('[FRONTEND] EventSource connection opened');
     };
 
-    eventSource.onmessage = (event) => {
+    eventSource.onmessage = async (event) => {
       console.log('[FRONTEND] Received message:', event.data);
       const data = JSON.parse(event.data);
       console.log('[FRONTEND] Parsed data:', data);
@@ -112,7 +97,7 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
         console.log('[FRONTEND] Ignoring event type:', data.type);
         if (data.type === 'done') {
           eventSource.close();
-          setInitialFetching(false);
+          setFetching(false);
           // Invalidate all data queries to refresh UI with new data
           queryClient.invalidateQueries({ queryKey: ['status'] });
           queryClient.invalidateQueries({ queryKey: ['assets'] });
@@ -123,79 +108,35 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
       }
 
       console.log('[FRONTEND] Setting progress:', data);
-      setInitialProgress(data as ProgressEvent);
+      setProgress(data as ProgressEvent);
 
-      if (data.type === 'complete' || data.type === 'error') {
+      if (data.type === 'complete') {
         eventSource.close();
-        setInitialFetching(false);
+        setFetching(false);
+
         // Invalidate all data queries to refresh UI with new data
         queryClient.invalidateQueries({ queryKey: ['status'] });
         queryClient.invalidateQueries({ queryKey: ['assets'] });
         queryClient.invalidateQueries({ queryKey: ['analytics'] });
         queryClient.invalidateQueries({ queryKey: ['fundingRates'] });
-      }
-    };
 
-    eventSource.onerror = () => {
-      eventSource.close();
-      setInitialFetching(false);
-      setInitialProgress({
-        type: 'error',
-        totalAssets: 0,
-        processedAssets: 0,
-        recordsFetched: 0,
-        errors: ['Connection error'],
-        percentage: 0,
-      });
-    };
-  };
-
-  // Connect to incremental fetch SSE stream
-  const connectToIncrementalFetch = () => {
-    if (incrementalEventSourceRef.current) {
-      incrementalEventSourceRef.current.close();
-    }
-
-    setIncrementalFetching(true);
-
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-    const eventSource = new EventSource(`${apiUrl}/fetch/incremental/stream?platform=${platform}`);
-    incrementalEventSourceRef.current = eventSource;
-
-    eventSource.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-
-      // Ignore connection confirmation events
-      if (data.type === 'connected' || data.type === 'done') {
-        if (data.type === 'done') {
-          eventSource.close();
-          setIncrementalFetching(false);
-          // Invalidate all data queries to refresh UI with new data
-          queryClient.invalidateQueries({ queryKey: ['status'] });
-          queryClient.invalidateQueries({ queryKey: ['assets'] });
-          queryClient.invalidateQueries({ queryKey: ['analytics'] });
-          queryClient.invalidateQueries({ queryKey: ['fundingRates'] });
+        // Automatically resample for Hyperliquid after successful fetch
+        if (platform === 'hyperliquid') {
+          console.log('[FRONTEND] Auto-resampling Hyperliquid data to 8h...');
+          await performResample();
         }
-        return;
-      }
-
-      setIncrementalProgress(data as ProgressEvent);
-
-      if (data.type === 'complete' || data.type === 'error') {
+      } else if (data.type === 'error') {
         eventSource.close();
-        setIncrementalFetching(false);
-        // Invalidate all data queries to refresh UI with new data
+        setFetching(false);
+        // Still invalidate queries even on error to show updated status
         queryClient.invalidateQueries({ queryKey: ['status'] });
-        queryClient.invalidateQueries({ queryKey: ['assets'] });
-        queryClient.invalidateQueries({ queryKey: ['analytics'] });
-        queryClient.invalidateQueries({ queryKey: ['fundingRates'] });
       }
     };
 
     eventSource.onerror = () => {
       eventSource.close();
-      setIncrementalFetching(false);
-      setIncrementalProgress({
+      setFetching(false);
+      setProgress({
         type: 'error',
         totalAssets: 0,
         processedAssets: 0,
@@ -206,33 +147,9 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
     };
   };
 
-  // Cleanup event sources on unmount
-  useEffect(() => {
-    return () => {
-      if (initialEventSourceRef.current) {
-        initialEventSourceRef.current.close();
-      }
-      if (incrementalEventSourceRef.current) {
-        incrementalEventSourceRef.current.close();
-      }
-    };
-  }, []);
-
-  const handleInitialFetch = () => {
-    // Clear progress before starting new fetch
-    setInitialProgress(null);
-    connectToInitialFetch();
-  };
-
-  const handleIncrementalFetch = () => {
-    // Clear progress before starting new fetch
-    setIncrementalProgress(null);
-    connectToIncrementalFetch();
-  };
-
-  const handleResample = async () => {
+  // Perform resampling for Hyperliquid
+  const performResample = async () => {
     setResampling(true);
-    setResamplingResult(null);
 
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
@@ -244,21 +161,61 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
       });
 
       const result = await response.json();
-      setResamplingResult(result);
+      console.log('[FRONTEND] Resampling result:', result);
+
+      // Update progress to show resampling success
+      if (result.success && progress) {
+        setProgress({
+          ...progress,
+          type: 'complete',
+        });
+      }
 
       // Invalidate queries to refresh the data
       queryClient.invalidateQueries({ queryKey: ['status'] });
     } catch (error) {
-      setResamplingResult({
-        success: false,
-        message: `Failed to resample: ${error}`,
-      });
+      console.error('[FRONTEND] Resampling failed:', error);
     } finally {
       setResampling(false);
     }
   };
 
-  const renderProgress = (progress: ProgressEvent | null, isFetching: boolean) => {
+  // Cleanup event sources on unmount
+  useEffect(() => {
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+    };
+  }, []);
+
+  // Smart fetch handler - determines whether to do initial or incremental fetch
+  const handleFetch = async () => {
+    try {
+      // Check if platform has existing data
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+      const response = await fetch(`${apiUrl}/status?platform=${platform}`);
+      const statusResponse = await response.json();
+      const status = statusResponse.data;
+
+      // Determine fetch type based on whether data exists
+      const hasData = status?.fundingRateCount > 0;
+      const type: 'initial' | 'incremental' = hasData ? 'incremental' : 'initial';
+
+      console.log(`[FRONTEND] Platform ${platform} has ${status?.fundingRateCount} records, using ${type} fetch`);
+
+      // Clear progress before starting new fetch
+      setProgress(null);
+      connectToFetch(type);
+    } catch (error) {
+      console.error('[FRONTEND] Failed to determine fetch type:', error);
+      // Default to initial fetch on error
+      setProgress(null);
+      connectToFetch('initial');
+    }
+  };
+
+  const renderProgress = (progress: ProgressEvent | null, isFetching: boolean, isResampling: boolean) => {
     if (!progress && !isFetching) return null;
 
     if (isFetching && !progress) {
@@ -290,6 +247,11 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
           {progress.errors.length > 0 && (
             <p className="text-xs text-orange-600 mt-1">
               {progress.errors.length} errors occurred
+            </p>
+          )}
+          {isResampling && platform === 'hyperliquid' && (
+            <p className="text-xs text-purple-600 mt-1">
+              Generating 8-hour aggregated data...
             </p>
           )}
         </div>
@@ -328,81 +290,41 @@ export default function DataFetcher({ platform }: DataFetcherProps) {
     return null;
   };
 
+  const getButtonText = () => {
+    if (fetching) {
+      return fetchType === 'initial' ? 'Fetching all data...' : 'Updating data...';
+    }
+    if (resampling) {
+      return 'Resampling...';
+    }
+    return 'Fetch Data';
+  };
+
+  const getDescription = () => {
+    if (platform === 'hyperliquid') {
+      return 'Fetch funding rate data (480 hours) and automatically generate 8-hour aggregated data for comparison';
+    }
+    return 'Fetch funding rate data for the last 480 hours';
+  };
+
   return (
     <div className="bg-white rounded-lg shadow p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-4">Data Management</h2>
 
-      <div className={`grid grid-cols-1 ${platform === 'hyperliquid' ? 'md:grid-cols-3' : 'md:grid-cols-2'} gap-4`}>
-        {/* Initial Fetch */}
-        <div className="border border-gray-200 rounded-lg p-4">
-          <h3 className="font-medium text-gray-900 mb-2">Initial Fetch</h3>
-          <p className="text-sm text-gray-600 mb-4">
-            Fetch all assets and their full funding history (last 480 hours)
-          </p>
-          <button
-            onClick={handleInitialFetch}
-            disabled={initialFetching || incrementalFetching || resampling}
-            className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            {initialFetching ? 'Fetching...' : 'Fetch Initial Data'}
-          </button>
+      <div className="border border-gray-200 rounded-lg p-4">
+        <h3 className="font-medium text-gray-900 mb-2">Fetch Data</h3>
+        <p className="text-sm text-gray-600 mb-4">
+          {getDescription()}
+        </p>
+        <button
+          onClick={handleFetch}
+          disabled={fetching || resampling}
+          className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+        >
+          {getButtonText()}
+        </button>
 
-          {renderProgress(initialProgress, initialFetching)}
-        </div>
-
-        {/* Incremental Fetch */}
-        <div className="border border-gray-200 rounded-lg p-4">
-          <h3 className="font-medium text-gray-900 mb-2">Incremental Update</h3>
-          <p className="text-sm text-gray-600 mb-4">
-            Fetch only new funding rates since the last update
-          </p>
-          <button
-            onClick={handleIncrementalFetch}
-            disabled={initialFetching || incrementalFetching || resampling}
-            className="w-full bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-          >
-            {incrementalFetching ? 'Updating...' : 'Update Data'}
-          </button>
-
-          {renderProgress(incrementalProgress, incrementalFetching)}
-        </div>
-
-        {/* Resample to 8h - Only for Hyperliquid */}
-        {platform === 'hyperliquid' && (
-          <div className="border border-gray-200 rounded-lg p-4">
-            <h3 className="font-medium text-gray-900 mb-2">Resample to 8h</h3>
-            <p className="text-sm text-gray-600 mb-4">
-              Generate 8-hour aggregated data for cross-platform comparison
-            </p>
-            <button
-              onClick={handleResample}
-              disabled={initialFetching || incrementalFetching || resampling}
-              className="w-full bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
-            >
-              {resampling ? 'Resampling...' : 'Generate 8h Data'}
-            </button>
-
-            {/* Resampling Result */}
-            {resamplingResult && (
-              <div className={`mt-3 p-3 border rounded ${
-                resamplingResult.success
-                  ? 'bg-green-50 border-green-200'
-                  : 'bg-red-50 border-red-200'
-              }`}>
-                <p className={`text-sm ${
-                  resamplingResult.success ? 'text-green-800' : 'text-red-800'
-                }`}>
-                  {resamplingResult.success ? '✓' : '✗'} {resamplingResult.message}
-                </p>
-                {resamplingResult.data && (
-                  <p className="text-xs text-gray-600 mt-1">
-                    {resamplingResult.data.assetsProcessed} assets processed, {resamplingResult.data.recordsCreated} 8h records created
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+        {renderProgress(progress, fetching, resampling)}
       </div>
     </div>
   );
