@@ -6,7 +6,7 @@ import Analytics from './Analytics';
 import DataFetcher from './DataFetcher';
 import StatusBar from './StatusBar';
 
-type Platform = 'hyperliquid' | 'binance' | 'bybit' | 'okx' | 'dydx' | 'aster';
+type Platform = 'hyperliquid' | 'binance' | 'bybit' | 'okx' | 'dydx' | 'gmx' | 'jupiter' | 'aster';
 
 const PLATFORMS: { id: Platform; name: string; enabled: boolean }[] = [
   // DEX Platforms
