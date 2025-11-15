@@ -100,7 +100,7 @@ export class DataFetcherService extends EventEmitter {
       case 'binance':
       case 'bybit':
       case 'okx':
-        return 3;
+        return 1;
       case 'dydx':
       case 'aster':
         return 5;
