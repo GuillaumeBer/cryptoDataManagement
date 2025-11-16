@@ -21,6 +21,7 @@ class FakeFetcher extends EventEmitter {
     }
     this.pushProgress({
       type: 'progress',
+      phase: 'fetch',
       totalAssets: 10,
       processedAssets: 5,
       currentAsset: 'BTC',
@@ -30,6 +31,7 @@ class FakeFetcher extends EventEmitter {
     });
     this.pushProgress({
       type: 'complete',
+      phase: 'fetch',
       totalAssets: 10,
       processedAssets: 10,
       currentAsset: 'ETH',
@@ -123,6 +125,7 @@ describe('createProgressStream', () => {
 
     fetcher.pushProgress({
       type: 'progress',
+      phase: 'fetch',
       totalAssets: 4,
       processedAssets: 2,
       currentAsset: 'SOL',
@@ -135,6 +138,7 @@ describe('createProgressStream', () => {
 
     fetcher.pushProgress({
       type: 'complete',
+      phase: 'fetch',
       totalAssets: 4,
       processedAssets: 4,
       currentAsset: 'SOL',

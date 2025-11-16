@@ -22,14 +22,20 @@ export interface FundingRate {
   asset_name: string | null;
 }
 
+export type ProgressPhase = 'fetch' | 'resample';
+
 export interface ProgressEvent {
   type: 'start' | 'progress' | 'complete' | 'error';
+  phase: ProgressPhase;
   totalAssets: number;
   processedAssets: number;
   currentAsset?: string;
   recordsFetched: number;
+  resampleRecordsCreated?: number;
+  resampleAssetsProcessed?: number;
   errors: string[];
   percentage: number;
+  message?: string;
 }
 
 export interface FetchInProgressState {

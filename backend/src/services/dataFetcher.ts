@@ -14,14 +14,20 @@ import { logger } from '../utils/logger';
 // Union type for all platform clients
 type PlatformClient = HyperliquidClient | AsterClient | BinanceClient | BybitClient | OKXClient | DyDxClient;
 
+export type ProgressPhase = 'fetch' | 'resample';
+
 export interface ProgressEvent {
   type: 'start' | 'progress' | 'complete' | 'error';
+  phase: ProgressPhase;
   totalAssets: number;
   processedAssets: number;
   currentAsset?: string;
   recordsFetched: number;
+  resampleRecordsCreated?: number;
+  resampleAssetsProcessed?: number;
   errors: string[];
   percentage: number;
+  message?: string;
 }
 
 export class DataFetcherService extends EventEmitter {
@@ -166,6 +172,72 @@ export class DataFetcherService extends EventEmitter {
     return this.currentProgress;
   }
 
+  private async finalizeFetchProgress(context: {
+    totalAssets: number;
+    assetsProcessed: number;
+    recordsFetched: number;
+    errors: string[];
+  }): Promise<void> {
+    if (this.platform !== 'hyperliquid') {
+      this.currentProgress = {
+        type: 'complete',
+        phase: 'fetch',
+        totalAssets: context.totalAssets,
+        processedAssets: context.assetsProcessed,
+        recordsFetched: context.recordsFetched,
+        errors: context.errors,
+        percentage: 100,
+      };
+      this.emit('progress', this.currentProgress);
+      return;
+    }
+
+    // Hyperliquid requires an additional resampling step
+    this.currentProgress = {
+      type: 'progress',
+      phase: 'resample',
+      totalAssets: context.totalAssets,
+      processedAssets: context.assetsProcessed,
+      recordsFetched: context.recordsFetched,
+      errors: context.errors,
+      percentage: 0,
+      message: 'Generating 8-hour aggregated data...'
+    };
+    this.emit('progress', this.currentProgress);
+
+    try {
+      const { assetsProcessed, recordsCreated } = await this.resampleHyperliquidTo8h();
+      this.currentProgress = {
+        type: 'complete',
+        phase: 'resample',
+        totalAssets: context.totalAssets,
+        processedAssets: context.assetsProcessed,
+        recordsFetched: context.recordsFetched,
+        resampleAssetsProcessed: assetsProcessed,
+        resampleRecordsCreated: recordsCreated,
+        errors: context.errors,
+        percentage: 100,
+        message: 'Fetch and resampling complete',
+      };
+      this.emit('progress', this.currentProgress);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      context.errors.push(errorMsg);
+      this.currentProgress = {
+        type: 'error',
+        phase: 'resample',
+        totalAssets: context.totalAssets,
+        processedAssets: context.assetsProcessed,
+        recordsFetched: context.recordsFetched,
+        errors: context.errors,
+        percentage: 0,
+        message: 'Resampling failed',
+      };
+      this.emit('progress', this.currentProgress);
+      throw error;
+    }
+  }
+
   /**
    * Initial fetch: Get all assets and their full funding history (last 480 hours)
    */
@@ -254,6 +326,7 @@ export class DataFetcherService extends EventEmitter {
       console.log(`[PROGRESS] START: 0/${assetSymbols.length} assets`);
       this.currentProgress = {
         type: 'start',
+        phase: 'fetch',
         totalAssets: assetSymbols.length,
         processedAssets: 0,
         recordsFetched: 0,
@@ -270,6 +343,7 @@ export class DataFetcherService extends EventEmitter {
           console.log(`[PROGRESS] ${processed}/${assetSymbols.length} - Current: ${currentSymbol} (${Math.round((processed / assetSymbols.length) * 100)}%)`);
           this.currentProgress = {
             type: 'progress',
+            phase: 'fetch',
             totalAssets: assetSymbols.length,
             processedAssets: processed,
             currentAsset: currentSymbol,
@@ -325,17 +399,14 @@ export class DataFetcherService extends EventEmitter {
         `Initial fetch completed: ${assetsProcessed} assets, ${recordsFetched} records, ${errors.length} errors`
       );
 
-      // Emit completion event
+      // Emit completion/resampling events
       console.log(`[PROGRESS] COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} records fetched`);
-      this.currentProgress = {
-        type: 'complete',
+      await this.finalizeFetchProgress({
         totalAssets: assets.length,
-        processedAssets: assetsProcessed,
+        assetsProcessed,
         recordsFetched,
         errors,
-        percentage: 100,
-      };
-      this.emit('progress', this.currentProgress);
+      });
 
       return { assetsProcessed, recordsFetched, errors };
     } catch (error) {
@@ -343,15 +414,18 @@ export class DataFetcherService extends EventEmitter {
       logger.error('Initial data fetch failed:', errorMsg);
 
       // Emit error event
-      this.currentProgress = {
-        type: 'error',
-        totalAssets: 0,
-        processedAssets: assetsProcessed,
-        recordsFetched,
-        errors: [...errors, errorMsg],
-        percentage: 0,
-      };
-      this.emit('progress', this.currentProgress);
+      if (this.currentProgress?.type !== 'error') {
+        this.currentProgress = {
+          type: 'error',
+          phase: 'fetch',
+          totalAssets: 0,
+          processedAssets: assetsProcessed,
+          recordsFetched,
+          errors: [...errors, errorMsg],
+          percentage: 0,
+        };
+        this.emit('progress', this.currentProgress);
+      }
 
       await FetchLogRepository.complete(
         fetchLog.id,
@@ -406,6 +480,7 @@ export class DataFetcherService extends EventEmitter {
       console.log(`[PROGRESS] INCREMENTAL START: 0/${assets.length} assets`);
       this.currentProgress = {
         type: 'start',
+        phase: 'fetch',
         totalAssets: assets.length,
         processedAssets: 0,
         recordsFetched: 0,
@@ -425,6 +500,7 @@ export class DataFetcherService extends EventEmitter {
           console.log(`[PROGRESS] INCREMENTAL ${processed}/${assets.length} - Current: ${currentSymbol} (${Math.round((processed / assets.length) * 100)}%)`);
           this.currentProgress = {
             type: 'progress',
+            phase: 'fetch',
             totalAssets: assets.length,
             processedAssets: processed,
             currentAsset: currentSymbol,
@@ -499,17 +575,14 @@ export class DataFetcherService extends EventEmitter {
         `Incremental fetch completed: ${assetsProcessed} assets, ${recordsFetched} new records, ${errors.length} errors`
       );
 
-      // Emit completion event
+      // Emit completion/resampling events
       console.log(`[PROGRESS] INCREMENTAL COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} new records fetched`);
-      this.currentProgress = {
-        type: 'complete',
+      await this.finalizeFetchProgress({
         totalAssets: assets.length,
-        processedAssets: assetsProcessed,
+        assetsProcessed,
         recordsFetched,
         errors,
-        percentage: 100,
-      };
-      this.emit('progress', this.currentProgress);
+      });
 
       return { assetsProcessed, recordsFetched, errors };
     } catch (error) {
@@ -517,15 +590,18 @@ export class DataFetcherService extends EventEmitter {
       logger.error('Incremental data fetch failed:', errorMsg);
 
       // Emit error event
-      this.currentProgress = {
-        type: 'error',
-        totalAssets: 0,
-        processedAssets: assetsProcessed,
-        recordsFetched,
-        errors: [...errors, errorMsg],
-        percentage: 0,
-      };
-      this.emit('progress', this.currentProgress);
+      if (this.currentProgress?.type !== 'error') {
+        this.currentProgress = {
+          type: 'error',
+          phase: 'fetch',
+          totalAssets: 0,
+          processedAssets: assetsProcessed,
+          recordsFetched,
+          errors: [...errors, errorMsg],
+          percentage: 0,
+        };
+        this.emit('progress', this.currentProgress);
+      }
 
       await FetchLogRepository.complete(
         fetchLog.id,
