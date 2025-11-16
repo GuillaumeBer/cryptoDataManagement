@@ -282,7 +282,7 @@ async function verifyHyperliquid(asset: string = 'BTC'): Promise<VerificationRes
     }
 
     // Compare latest funding rate
-    const latestApi = apiData[apiData.length - 1];
+    const latestApi = apiData[0];
     const latestDb = dbData[0];
 
     console.log(`  Latest API rate: ${latestApi.fundingRate} at ${latestApi.timestamp}`);
@@ -301,7 +301,7 @@ async function verifyHyperliquid(asset: string = 'BTC'): Promise<VerificationRes
     // Compare multiple data points
     const samplesToCheck = Math.min(5, apiData.length, dbData.length);
     for (let i = 0; i < samplesToCheck; i++) {
-      const api = apiData[apiData.length - 1 - i];
+      const api = apiData[i];
       const db = dbData[i];
       const apiR = parseFloat(api.fundingRate);
       const dbR = parseFloat(db.funding_rate);
@@ -632,7 +632,7 @@ async function verifyDyDx(asset: string = 'BTC-USD'): Promise<VerificationResult
       return result;
     }
 
-    const latestApi = apiData[apiData.length - 1];
+    const latestApi = apiData[0];
     const latestDb = dbData[0];
 
     console.log(`  Latest API rate: ${latestApi.fundingRate} at ${latestApi.timestamp}`);
@@ -650,7 +650,7 @@ async function verifyDyDx(asset: string = 'BTC-USD'): Promise<VerificationResult
 
     const samplesToCheck = Math.min(5, apiData.length, dbData.length);
     for (let i = 0; i < samplesToCheck; i++) {
-      const api = apiData[apiData.length - 1 - i];
+      const api = apiData[i];
       const db = dbData[i];
       const apiR = parseFloat(api.fundingRate);
       const dbR = parseFloat(db.funding_rate);
