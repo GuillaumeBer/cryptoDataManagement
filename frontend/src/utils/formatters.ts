@@ -1,13 +1,22 @@
 import { format } from 'date-fns';
 
+function toNumber(value: number | string): number {
+  return typeof value === 'string' ? parseFloat(value) : value;
+}
+
 export function formatNumber(value: number | string, decimals: number = 4): string {
-  const num = typeof value === 'string' ? parseFloat(value) : value;
+  const num = toNumber(value);
   return num.toFixed(decimals);
 }
 
-export function formatPercentage(value: number | string): string {
-  const num = typeof value === 'string' ? parseFloat(value) : value;
-  return `${(num * 100).toFixed(4)}%`;
+export function formatPercentage(value: number | string, decimals: number = 4): string {
+  const num = toNumber(value);
+  return `${num.toFixed(decimals)}%`;
+}
+
+export function formatFractionToPercent(value: number | string, decimals: number = 4): string {
+  const num = toNumber(value);
+  return formatPercentage(num * 100, decimals);
 }
 
 export function formatDate(date: string | Date, formatStr: string = 'MMM dd, yyyy HH:mm'): string {
