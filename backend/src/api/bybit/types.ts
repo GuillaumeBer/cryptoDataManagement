@@ -66,3 +66,37 @@ export interface FetchedFundingData {
   fundingRate: string;
   premium: string;
 }
+
+export interface BybitKlineItem {
+  0: string; // Start time
+  1: string; // Open
+  2: string; // High
+  3: string; // Low
+  4: string; // Close
+  5: string; // Volume
+  6: string; // Turnover (quote volume)
+}
+
+export interface BybitKlineResponse {
+  retCode: number;
+  retMsg: string;
+  result: {
+    category: string;
+    symbol: string;
+    list: BybitKlineItem[];
+  };
+  retExtInfo: {};
+  time: number;
+}
+
+export interface FetchedOHLCVData {
+  asset: string;
+  timestamp: Date;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string;
+  quoteVolume: string;
+  tradesCount: number;
+}

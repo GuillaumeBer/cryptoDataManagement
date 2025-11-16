@@ -51,3 +51,33 @@ export interface FetchedFundingData {
   fundingRate: string;
   premium: string;
 }
+
+export interface OKXKline {
+  0: string; // Timestamp (ms)
+  1: string; // Open
+  2: string; // High
+  3: string; // Low
+  4: string; // Close
+  5: string; // Volume (contracts)
+  6: string; // Volume (currency)
+  7: string; // Volume (quote currency)
+  8: string; // Confirm (0: not confirmed, 1: confirmed)
+}
+
+export interface OKXKlineResponse {
+  code: string; // "0" for success
+  msg: string;
+  data: OKXKline[];
+}
+
+export interface FetchedOHLCVData {
+  asset: string;
+  timestamp: Date;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string;
+  quoteVolume: string;
+  tradesCount: number;
+}

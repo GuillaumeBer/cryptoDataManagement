@@ -30,3 +30,41 @@ export interface FetchedFundingData {
   fundingRate: string;
   premium: string;
 }
+
+export interface HyperliquidCandle {
+  t: number;  // Open time (ms)
+  T: number;  // Close time (ms)
+  s: string;  // Symbol
+  i: string;  // Interval
+  o: string;  // Open
+  h: string;  // High
+  l: string;  // Low
+  c: string;  // Close
+  v: string;  // Volume
+  n: number;  // Number of trades
+}
+
+export interface HyperliquidCandleSnapshotRequest {
+  coin: string;
+  interval: string;
+  startTime: number;
+  endTime?: number;
+}
+
+export interface HyperliquidCandleSnapshotResponse {
+  type: 'candleSnapshot';
+  req: HyperliquidCandleSnapshotRequest;
+  data: HyperliquidCandle[];
+}
+
+export interface FetchedOHLCVData {
+  asset: string;
+  timestamp: Date;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string;
+  quoteVolume: string;
+  tradesCount: number;
+}

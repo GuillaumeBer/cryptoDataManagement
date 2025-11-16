@@ -6,6 +6,8 @@ import {
   OKXInstrumentsResponse,
   OKXFundingRateHistoryResponse,
   FetchedFundingData,
+  OKXKlineResponse,
+  FetchedOHLCVData,
 } from './types';
 
 /**
@@ -286,6 +288,137 @@ export class OKXClient {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Fetch OHLCV (candlestick) history for a specific symbol
+   * Endpoint: GET /api/v5/market/history-candles
+   *
+   * API Documentation:
+   * - Max limit: 100 records per request (need multiple requests)
+   * - Bar: "1H" for 1-hour candles
+   *
+   * Rate Limits:
+   * - 20 requests per 2 seconds
+   */
+  async getOHLCV(symbol: string, bar: string = '1H'): Promise<FetchedOHLCVData[]> {
+    try {
+      logger.debug(`Fetching OHLCV history for ${symbol} from OKX`);
+
+      // Calculate time range: 480 hours ago to match funding rate depth
+      const hoursAgo = 480;
+      const after = Date.now() - (hoursAgo * 60 * 60 * 1000);
+      const before = Date.now();
+
+      // OKX limits to 100 candles per request, need to fetch in batches
+      const allResults: FetchedOHLCVData[] = [];
+      let currentAfter = after;
+
+      while (currentAfter < before) {
+        const response = await this.client.get<OKXKlineResponse>('/api/v5/market/history-candles', {
+          params: {
+            instId: symbol,
+            bar,
+            after: currentAfter.toString(),
+            before: before.toString(),
+            limit: '100',
+          },
+        });
+
+        // Check if request was successful
+        if (response.data.code !== '0') {
+          throw new Error(`OKX API error: ${response.data.msg}`);
+        }
+
+        const candles = response.data.data;
+        if (!candles || !Array.isArray(candles) || candles.length === 0) {
+          break; // No more data
+        }
+
+        const results: FetchedOHLCVData[] = candles.map((candle) => ({
+          asset: symbol,
+          timestamp: new Date(parseInt(candle[0])),
+          open: candle[1],
+          high: candle[2],
+          low: candle[3],
+          close: candle[4],
+          volume: candle[5],
+          quoteVolume: candle[7],
+          tradesCount: 0, // OKX doesn't provide trade count in candle data
+        }));
+
+        allResults.push(...results);
+
+        // Update currentAfter to the timestamp of the last candle
+        const lastTimestamp = parseInt(candles[candles.length - 1][0]);
+        currentAfter = lastTimestamp + 1;
+
+        // Small delay between pagination requests
+        if (currentAfter < before) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+
+      logger.debug(`Fetched ${allResults.length} OHLCV records for ${symbol}`);
+      return allResults;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch OHLCV for ${symbol}: ${errorMsg}`);
+      throw new Error(`Failed to fetch OHLCV for ${symbol}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch OHLCV history for multiple symbols with rate limiting
+   *
+   * OKX Rate Limits:
+   * - /api/v5/market/history-candles endpoint: 20 requests per 2 seconds
+   * - Conservative delay: 600ms (100 requests/min) to stay well within limits
+   */
+  async getOHLCVBatch(
+    symbols: string[],
+    bar: string = '1H',
+    delayMs: number = 600,
+    concurrency: number = 1,
+    onProgress?: (currentSymbol: string, processed: number) => void
+  ): Promise<Map<string, FetchedOHLCVData[]>> {
+    const results = new Map<string, FetchedOHLCVData[]>();
+
+    logger.info(`Fetching OHLCV data for ${symbols.length} assets from OKX`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      symbols,
+      async (symbol) => {
+        try {
+          logger.info(`[API] Fetching OHLCV ${symbol} from OKX...`);
+          const data = await this.getOHLCV(symbol, bar);
+          results.set(symbol, data);
+          logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
+          results.set(symbol, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(symbol, processed);
+          }
+        }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
+
+    const totalRecords = Array.from(results.values()).reduce(
+      (sum, data) => sum + data.length,
+      0
+    );
+    logger.info(`Fetched total of ${totalRecords} OHLCV records from OKX`);
+
+    return results;
   }
 }
 

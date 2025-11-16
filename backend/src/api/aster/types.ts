@@ -29,3 +29,26 @@ export interface FetchedFundingData {
   premium: string;
 }
 
+export interface AsterKline {
+  0: number;  // Open time
+  1: string;  // Open
+  2: string;  // High
+  3: string;  // Low
+  4: string;  // Close
+  5: string;  // Volume
+  6: number;  // Close time
+  7: number;  // Number of trades
+}
+
+export interface FetchedOHLCVData {
+  asset: string;
+  timestamp: Date;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string;
+  quoteVolume: string;
+  tradesCount: number;
+}
+

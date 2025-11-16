@@ -6,6 +6,8 @@ import {
   DyDxMarketsResponse,
   DyDxHistoricalFundingResponse,
   FetchedFundingData,
+  DyDxCandlesResponse,
+  FetchedOHLCVData,
 } from './types';
 
 /**
@@ -234,6 +236,114 @@ export class DyDxClient {
       0
     );
     logger.info(`Fetched total of ${totalRecords} funding rate records from DyDx V4`);
+
+    return results;
+  }
+
+  /**
+   * Fetch OHLCV (candle) history for a specific symbol
+   * Endpoint: GET /v4/candles/perpetualMarkets/{ticker}
+   *
+   * API Documentation:
+   * - Resolution: "1HOUR" for 1-hour candles
+   * - Can use fromISO and toISO for time range
+   *
+   * Rate Limits:
+   * - Public endpoints: Conservative approach
+   */
+  async getOHLCV(symbol: string, resolution: string = '1HOUR'): Promise<FetchedOHLCVData[]> {
+    try {
+      logger.debug(`Fetching OHLCV history for ${symbol} from DyDx`);
+
+      // Calculate time range: 480 hours ago to match funding rate depth
+      const hoursAgo = 480;
+      const fromISO = new Date(Date.now() - (hoursAgo * 60 * 60 * 1000)).toISOString();
+      const toISO = new Date().toISOString();
+
+      const response = await this.client.get<DyDxCandlesResponse>(`/v4/candles/perpetualMarkets/${symbol}`, {
+        params: {
+          resolution,
+          fromISO,
+          toISO,
+          limit: 500, // Fetch sufficient data
+        },
+      });
+
+      const candles = response.data.candles;
+      if (!candles || !Array.isArray(candles)) {
+        logger.warn(`No OHLCV data found for ${symbol}`);
+        return [];
+      }
+
+      const results: FetchedOHLCVData[] = candles.map((candle) => ({
+        asset: symbol,
+        timestamp: new Date(candle.startedAt),
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        volume: candle.baseTokenVolume,
+        quoteVolume: candle.usdVolume,
+        tradesCount: candle.trades,
+      }));
+
+      logger.debug(`Fetched ${results.length} OHLCV records for ${symbol}`);
+      return results;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch OHLCV for ${symbol}: ${errorMsg}`);
+      throw new Error(`Failed to fetch OHLCV for ${symbol}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch OHLCV history for multiple symbols with rate limiting
+   *
+   * DyDx Rate Limits:
+   * - Conservative delay: 100ms to match funding rate fetching pattern
+   */
+  async getOHLCVBatch(
+    symbols: string[],
+    resolution: string = '1HOUR',
+    delayMs: number = 100,
+    concurrency: number = 5,
+    onProgress?: (currentSymbol: string, processed: number) => void
+  ): Promise<Map<string, FetchedOHLCVData[]>> {
+    const results = new Map<string, FetchedOHLCVData[]>();
+
+    logger.info(`Fetching OHLCV data for ${symbols.length} assets from DyDx`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      symbols,
+      async (symbol) => {
+        try {
+          logger.info(`[API] Fetching OHLCV ${symbol} from DyDx...`);
+          const data = await this.getOHLCV(symbol, resolution);
+          results.set(symbol, data);
+          logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
+          results.set(symbol, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(symbol, processed);
+          }
+        }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
+
+    const totalRecords = Array.from(results.values()).reduce(
+      (sum, data) => sum + data.length,
+      0
+    );
+    logger.info(`Fetched total of ${totalRecords} OHLCV records from DyDx`);
 
     return results;
   }

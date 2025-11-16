@@ -49,3 +49,33 @@ export interface FetchedFundingData {
   fundingRate: string;
   premium: string;
 }
+
+export interface DyDxCandle {
+  startedAt: string; // ISO 8601 timestamp
+  ticker: string;
+  resolution: string; // "1HOUR"
+  low: string;
+  high: string;
+  open: string;
+  close: string;
+  baseTokenVolume: string;
+  usdVolume: string;
+  trades: number;
+  startingOpenInterest: string;
+}
+
+export interface DyDxCandlesResponse {
+  candles: DyDxCandle[];
+}
+
+export interface FetchedOHLCVData {
+  asset: string;
+  timestamp: Date;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string;
+  quoteVolume: string;
+  tradesCount: number;
+}

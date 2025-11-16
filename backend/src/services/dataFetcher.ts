@@ -7,8 +7,9 @@ import OKXClient from '../api/okx/client';
 import DyDxClient from '../api/dydx/client';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
+import OHLCVRepository from '../models/OHLCVRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
-import { CreateFundingRateParams } from '../models/types';
+import { CreateFundingRateParams, CreateOHLCVParams } from '../models/types';
 import {
   normalizePlatformAsset,
   SupportedPlatform,
@@ -24,6 +25,18 @@ interface FundingHistoryRecord {
   premium: string;
 }
 
+interface OHLCVRecord {
+  asset: string;
+  timestamp: Date;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string;
+  quoteVolume: string;
+  tradesCount: number;
+}
+
 // Union type for all platform clients
 type PlatformClient = {
   getAssets(): Promise<PlatformAssetPayload[]>;
@@ -33,6 +46,13 @@ type PlatformClient = {
     concurrency?: number,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FundingHistoryRecord[]>>;
+  getOHLCVBatch(
+    symbols: string[],
+    interval?: string | number,
+    delayMs?: number,
+    concurrency?: number,
+    onProgress?: (currentSymbol: string, processed: number) => void
+  ): Promise<Map<string, OHLCVRecord[]>>;
 };
 
 export type ProgressPhase = 'fetch' | 'resample';
@@ -44,6 +64,7 @@ export interface ProgressEvent {
   processedAssets: number;
   currentAsset?: string;
   recordsFetched: number;
+  ohlcvRecordsFetched?: number;
   resampleRecordsCreated?: number;
   resampleAssetsProcessed?: number;
   errors: string[];
@@ -76,6 +97,33 @@ export class DataFetcherService extends EventEmitter {
       case 'hyperliquid':
       case 'dydx':
       case 'aster':
+      default:
+        return '1h';
+    }
+  }
+
+  /**
+   * Get the OHLCV interval parameter for each platform
+   * Each platform uses different formats for 1-hour candles:
+   * - Binance: "1h"
+   * - Bybit: "60" (minutes)
+   * - OKX: "1H"
+   * - Hyperliquid: "1h"
+   * - DyDx: "1HOUR"
+   * - Aster: "1h"
+   */
+  private getOHLCVInterval(): string | number {
+    switch (this.platform) {
+      case 'binance':
+      case 'hyperliquid':
+      case 'aster':
+        return '1h';
+      case 'bybit':
+        return '60'; // Bybit uses minutes
+      case 'okx':
+        return '1H'; // OKX uses uppercase
+      case 'dydx':
+        return '1HOUR'; // DyDx uses full word
       default:
         return '1h';
     }
@@ -271,6 +319,7 @@ export class DataFetcherService extends EventEmitter {
   async fetchInitialData(): Promise<{
     assetsProcessed: number;
     recordsFetched: number;
+    ohlcvRecordsFetched: number;
     errors: string[];
   }> {
     // Prevent concurrent fetches
@@ -282,11 +331,12 @@ export class DataFetcherService extends EventEmitter {
     }
 
     this.isInitialFetchInProgress = true;
-    logger.info('Starting initial data fetch from Hyperliquid');
+    logger.info(`Starting initial data fetch from ${this.platform}`);
 
     const fetchLog = await FetchLogRepository.create(this.platform, 'initial');
     let assetsProcessed = 0;
     let recordsFetched = 0;
+    let ohlcvRecordsFetched = 0;
     const errors: string[] = [];
 
     try {
@@ -382,9 +432,75 @@ export class DataFetcherService extends EventEmitter {
           recordsFetched += inserted;
           assetsProcessed++;
 
-          logger.debug(`Stored ${inserted} records for ${symbol}`);
+          logger.debug(`Stored ${inserted} funding rate records for ${symbol}`);
         } catch (error) {
           const errorMsg = `Failed to store funding data for ${symbol}: ${error}`;
+          logger.error(errorMsg);
+          errors.push(errorMsg);
+        }
+      }
+
+      // Step 4: Fetch and store OHLCV data
+      logger.info(`Fetching OHLCV data for ${assetSymbols.length} assets from ${this.platform}`);
+      let ohlcvAssetsProcessed = 0;
+
+      const ohlcvDataMap = await this.platformClient.getOHLCVBatch(
+        assetSymbols,
+        this.getOHLCVInterval(),
+        this.getRateLimitDelay(),
+        this.getConcurrencyLimit(),
+        (currentSymbol: string, processed: number) => {
+          logger.debug('[PROGRESS] OHLCV fetch progress', {
+            processed,
+            total: assetSymbols.length,
+            currentSymbol,
+            percentage: Math.round((processed / assetSymbols.length) * 100),
+          });
+          this.currentProgress = {
+            type: 'progress',
+            phase: 'fetch',
+            totalAssets: assetSymbols.length,
+            processedAssets: assetsProcessed,
+            currentAsset: currentSymbol,
+            recordsFetched,
+            ohlcvRecordsFetched,
+            errors,
+            percentage: Math.round(((assetsProcessed + processed) / (assetSymbols.length * 2)) * 100),
+          };
+          this.emit('progress', this.currentProgress);
+        }
+      );
+
+      // Step 5: Store OHLCV data
+      for (const [symbol, ohlcvData] of ohlcvDataMap.entries()) {
+        try {
+          const assetId = assetMap.get(symbol);
+          if (!assetId) {
+            errors.push(`Asset not found for OHLCV: ${symbol}`);
+            continue;
+          }
+
+          const records: CreateOHLCVParams[] = ohlcvData.map((data) => ({
+            asset_id: assetId,
+            timestamp: data.timestamp,
+            timeframe: '1h',
+            open: data.open,
+            high: data.high,
+            low: data.low,
+            close: data.close,
+            volume: data.volume,
+            quote_volume: data.quoteVolume,
+            trades_count: data.tradesCount,
+            platform: this.platform,
+          }));
+
+          const inserted = await OHLCVRepository.bulkInsert(records);
+          ohlcvRecordsFetched += inserted;
+          ohlcvAssetsProcessed++;
+
+          logger.debug(`Stored ${inserted} OHLCV records for ${symbol}`);
+        } catch (error) {
+          const errorMsg = `Failed to store OHLCV data for ${symbol}: ${error}`;
           logger.error(errorMsg);
           errors.push(errorMsg);
         }
@@ -401,11 +517,11 @@ export class DataFetcherService extends EventEmitter {
       );
 
       logger.info(
-        `Initial fetch completed: ${assetsProcessed} assets, ${recordsFetched} records, ${errors.length} errors`
+        `Initial fetch completed: ${assetsProcessed} assets, ${recordsFetched} funding rate records, ${ohlcvRecordsFetched} OHLCV records, ${errors.length} errors`
       );
 
       // Emit completion/resampling events
-      logger.info(`[PROGRESS] COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} records fetched`);
+      logger.info(`[PROGRESS] COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} funding rate records, ${ohlcvRecordsFetched} OHLCV records fetched`);
       await this.finalizeFetchProgress({
         totalAssets: assets.length,
         assetsProcessed,
@@ -413,7 +529,7 @@ export class DataFetcherService extends EventEmitter {
         errors,
       });
 
-      return { assetsProcessed, recordsFetched, errors };
+      return { assetsProcessed, recordsFetched, ohlcvRecordsFetched, errors };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       logger.error('Initial data fetch failed:', errorMsg);
@@ -448,11 +564,12 @@ export class DataFetcherService extends EventEmitter {
   }
 
   /**
-   * Incremental fetch: Get only new funding rates since last fetch
+   * Incremental fetch: Get only new funding rates and OHLCV data since last fetch
    */
   async fetchIncrementalData(): Promise<{
     assetsProcessed: number;
     recordsFetched: number;
+    ohlcvRecordsFetched: number;
     errors: string[];
   }> {
     // Prevent concurrent fetches
@@ -464,11 +581,12 @@ export class DataFetcherService extends EventEmitter {
     }
 
     this.isIncrementalFetchInProgress = true;
-    logger.info('Starting incremental data fetch from Hyperliquid');
+    logger.info(`Starting incremental data fetch from ${this.platform}`);
 
     const fetchLog = await FetchLogRepository.create(this.platform, 'incremental');
     let assetsProcessed = 0;
     let recordsFetched = 0;
+    let ohlcvRecordsFetched = 0;
     const errors: string[] = [];
 
     try {
@@ -478,7 +596,7 @@ export class DataFetcherService extends EventEmitter {
       if (assets.length === 0) {
         logger.warn('No assets found. Run initial fetch first.');
         await FetchLogRepository.complete(fetchLog.id, 'failed', 0, 0, 'No assets found');
-        return { assetsProcessed: 0, recordsFetched: 0, errors: ['No assets found'] };
+        return { assetsProcessed: 0, recordsFetched: 0, ohlcvRecordsFetched: 0, errors: ['No assets found'] };
       }
 
       // Emit start event
@@ -563,9 +681,94 @@ export class DataFetcherService extends EventEmitter {
           recordsFetched += inserted;
           assetsProcessed++;
 
-          logger.debug(`Stored ${inserted} new records for ${asset.symbol}`);
+          logger.debug(`Stored ${inserted} new funding rate records for ${asset.symbol}`);
         } catch (error) {
-          const errorMsg = `Failed to process ${asset.symbol}: ${error}`;
+          const errorMsg = `Failed to process funding rate for ${asset.symbol}: ${error}`;
+          logger.error(errorMsg);
+          errors.push(errorMsg);
+        }
+      }
+
+      // Fetch and store OHLCV data
+      logger.info(`Fetching OHLCV data for ${assets.length} assets from ${this.platform}`);
+      let ohlcvAssetsProcessed = 0;
+
+      const ohlcvDataMap = await this.platformClient.getOHLCVBatch(
+        assetSymbols,
+        this.getOHLCVInterval(),
+        this.getRateLimitDelay(),
+        this.getConcurrencyLimit(),
+        (currentSymbol: string, processed: number) => {
+          logger.debug('[PROGRESS] OHLCV incremental fetch progress', {
+            processed,
+            total: assets.length,
+            currentSymbol,
+            percentage: Math.round((processed / assets.length) * 100),
+          });
+          this.currentProgress = {
+            type: 'progress',
+            phase: 'fetch',
+            totalAssets: assets.length,
+            processedAssets: assetsProcessed,
+            currentAsset: currentSymbol,
+            recordsFetched,
+            ohlcvRecordsFetched,
+            errors,
+            percentage: Math.round(((assetsProcessed + processed) / (assets.length * 2)) * 100),
+          };
+          this.emit('progress', this.currentProgress);
+        }
+      );
+
+      const latestOHLCVTimestampMap = await OHLCVRepository.getLatestTimestamps(
+        assets.map((asset) => asset.id),
+        this.platform,
+        '1h'
+      );
+
+      // Store only new OHLCV records
+      for (const asset of assets) {
+        try {
+          const ohlcvData = ohlcvDataMap.get(asset.symbol) || [];
+
+          if (ohlcvData.length === 0) {
+            continue;
+          }
+
+          // Get latest timestamp we have for this asset
+          const latestTimestamp = latestOHLCVTimestampMap.get(asset.id) || null;
+
+          // Filter only new records
+          const newRecords = latestTimestamp
+            ? ohlcvData.filter((data) => data.timestamp > latestTimestamp)
+            : ohlcvData;
+
+          if (newRecords.length === 0) {
+            logger.debug(`No new OHLCV records for ${asset.symbol}`);
+            continue;
+          }
+
+          const records: CreateOHLCVParams[] = newRecords.map((data) => ({
+            asset_id: asset.id,
+            timestamp: data.timestamp,
+            timeframe: '1h',
+            open: data.open,
+            high: data.high,
+            low: data.low,
+            close: data.close,
+            volume: data.volume,
+            quote_volume: data.quoteVolume,
+            trades_count: data.tradesCount,
+            platform: this.platform,
+          }));
+
+          const inserted = await OHLCVRepository.bulkInsert(records);
+          ohlcvRecordsFetched += inserted;
+          ohlcvAssetsProcessed++;
+
+          logger.debug(`Stored ${inserted} new OHLCV records for ${asset.symbol}`);
+        } catch (error) {
+          const errorMsg = `Failed to process OHLCV for ${asset.symbol}: ${error}`;
           logger.error(errorMsg);
           errors.push(errorMsg);
         }
@@ -582,12 +785,12 @@ export class DataFetcherService extends EventEmitter {
       );
 
       logger.info(
-        `Incremental fetch completed: ${assetsProcessed} assets, ${recordsFetched} new records, ${errors.length} errors`
+        `Incremental fetch completed: ${assetsProcessed} assets, ${recordsFetched} new funding rate records, ${ohlcvRecordsFetched} new OHLCV records, ${errors.length} errors`
       );
 
       // Emit completion/resampling events
       logger.info(
-        `[PROGRESS] INCREMENTAL COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} new records fetched`
+        `[PROGRESS] INCREMENTAL COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} funding rate records, ${ohlcvRecordsFetched} OHLCV records fetched`
       );
       await this.finalizeFetchProgress({
         totalAssets: assets.length,
@@ -596,7 +799,7 @@ export class DataFetcherService extends EventEmitter {
         errors,
       });
 
-      return { assetsProcessed, recordsFetched, errors };
+      return { assetsProcessed, recordsFetched, ohlcvRecordsFetched, errors };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       logger.error('Incremental data fetch failed:', errorMsg);
@@ -678,12 +881,14 @@ export class DataFetcherService extends EventEmitter {
   async getStatus() {
     const assetCount = await AssetRepository.count(this.platform);
     const fundingRateCount = await FundingRateRepository.count(this.platform);
+    const ohlcvCount = await OHLCVRepository.count(this.platform, '1h');
     const lastFetch = await FetchLogRepository.getLastSuccessful(this.platform);
 
     return {
       platform: this.platform,
       assetCount,
       fundingRateCount,
+      ohlcvCount,
       lastFetch: lastFetch
         ? {
             type: lastFetch.fetch_type,

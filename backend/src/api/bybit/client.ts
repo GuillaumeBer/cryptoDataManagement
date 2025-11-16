@@ -6,6 +6,8 @@ import {
   BybitInstrumentsResponse,
   BybitFundingRateHistoryResponse,
   FetchedFundingData,
+  BybitKlineResponse,
+  FetchedOHLCVData,
 } from './types';
 
 /**
@@ -227,6 +229,122 @@ export class BybitClient {
       0
     );
     logger.info(`Fetched total of ${totalRecords} funding rate records from Bybit`);
+
+    return results;
+  }
+
+  /**
+   * Fetch OHLCV (kline) history for a specific symbol
+   * Endpoint: GET /v5/market/kline
+   *
+   * API Documentation:
+   * - Max limit: 1000 records per request
+   * - Interval: 60 for 1-hour candles (in minutes)
+   *
+   * Rate Limits:
+   * - 50 requests per 2 seconds
+   */
+  async getOHLCV(symbol: string, interval: string = '60'): Promise<FetchedOHLCVData[]> {
+    try {
+      logger.debug(`Fetching OHLCV history for ${symbol} from Bybit`);
+
+      // Calculate time range: 480 hours ago to match funding rate depth
+      const hoursAgo = 480;
+      const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
+      const endTime = Date.now();
+
+      const response = await this.client.get<BybitKlineResponse>('/v5/market/kline', {
+        params: {
+          category: 'linear',
+          symbol,
+          interval,
+          start: startTime,
+          end: endTime,
+          limit: 1000, // Max allowed by Bybit
+        },
+      });
+
+      // Check if request was successful
+      if (response.data.retCode !== 0) {
+        throw new Error(`Bybit API error: ${response.data.retMsg}`);
+      }
+
+      const klines = response.data.result.list;
+      if (!klines || !Array.isArray(klines)) {
+        logger.warn(`No OHLCV data found for ${symbol}`);
+        return [];
+      }
+
+      const results: FetchedOHLCVData[] = klines.map((kline) => ({
+        asset: symbol,
+        timestamp: new Date(parseInt(kline[0])),
+        open: kline[1],
+        high: kline[2],
+        low: kline[3],
+        close: kline[4],
+        volume: kline[5],
+        quoteVolume: kline[6],
+        tradesCount: 0, // Bybit doesn't provide trade count in kline data
+      }));
+
+      logger.debug(`Fetched ${results.length} OHLCV records for ${symbol}`);
+      return results;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch OHLCV for ${symbol}: ${errorMsg}`);
+      throw new Error(`Failed to fetch OHLCV for ${symbol}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch OHLCV history for multiple symbols with rate limiting
+   *
+   * Bybit Rate Limits:
+   * - /v5/market/kline endpoint: 50 requests per 2 seconds
+   * - Conservative delay: 600ms (100 requests/min) to stay well within limits
+   */
+  async getOHLCVBatch(
+    symbols: string[],
+    interval: string = '60',
+    delayMs: number = 600,
+    concurrency: number = 1,
+    onProgress?: (currentSymbol: string, processed: number) => void
+  ): Promise<Map<string, FetchedOHLCVData[]>> {
+    const results = new Map<string, FetchedOHLCVData[]>();
+
+    logger.info(`Fetching OHLCV data for ${symbols.length} assets from Bybit`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      symbols,
+      async (symbol) => {
+        try {
+          logger.info(`[API] Fetching OHLCV ${symbol} from Bybit...`);
+          const data = await this.getOHLCV(symbol, interval);
+          results.set(symbol, data);
+          logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
+          results.set(symbol, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(symbol, processed);
+          }
+        }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
+
+    const totalRecords = Array.from(results.values()).reduce(
+      (sum, data) => sum + data.length,
+      0
+    );
+    logger.info(`Fetched total of ${totalRecords} OHLCV records from Bybit`);
 
     return results;
   }
