@@ -216,7 +216,6 @@ export class OKXClient {
       return filteredResults;
     } catch (error: any) {
       const errorMsg = this.getErrorMessage(error);
-      console.error(`Failed to fetch funding history for ${instId}:`, errorMsg);
       logger.error(`Failed to fetch funding history for ${instId}: ${errorMsg}`);
       throw new Error(`Failed to fetch funding history for ${instId}: ${errorMsg}`);
     }
@@ -252,13 +251,13 @@ export class OKXClient {
       instIds,
       async (instId) => {
         try {
-          console.log(`[API] Fetching ${instId} from OKX...`);
+          logger.info(`[API] Fetching ${instId} from OKX...`);
           const data = await this.getFundingHistory(instId);
           results.set(instId, data);
-          console.log(`[API] ✓ ${instId}: ${data.length} records`);
+          logger.info(`[API] ✓ ${instId}: ${data.length} records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
-          console.log(`[API] ✗ ${instId}: FAILED - ${errorMsg}`);
+          logger.error(`[API] ✗ ${instId}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch funding history for ${instId}`, errorMsg);
 
           // Store empty array for failed instruments to maintain consistency

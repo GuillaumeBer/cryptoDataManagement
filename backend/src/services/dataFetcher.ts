@@ -251,7 +251,7 @@ export class DataFetcherService extends EventEmitter {
       const assetMap = new Map(storedAssets.map((asset) => [asset.symbol, asset.id]));
 
       // Emit start event
-      console.log(`[PROGRESS] START: 0/${assetSymbols.length} assets`);
+      logger.info(`[PROGRESS] START: 0/${assetSymbols.length} assets`);
       this.currentProgress = {
         type: 'start',
         totalAssets: assetSymbols.length,
@@ -267,7 +267,12 @@ export class DataFetcherService extends EventEmitter {
         this.getConcurrencyLimit(),
         (currentSymbol: string, processed: number) => {
           // Emit progress event for each asset
-          console.log(`[PROGRESS] ${processed}/${assetSymbols.length} - Current: ${currentSymbol} (${Math.round((processed / assetSymbols.length) * 100)}%)`);
+          logger.debug('[PROGRESS] Asset fetch progress', {
+            processed,
+            total: assetSymbols.length,
+            currentSymbol,
+            percentage: Math.round((processed / assetSymbols.length) * 100),
+          });
           this.currentProgress = {
             type: 'progress',
             totalAssets: assetSymbols.length,
@@ -326,7 +331,7 @@ export class DataFetcherService extends EventEmitter {
       );
 
       // Emit completion event
-      console.log(`[PROGRESS] COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} records fetched`);
+      logger.info(`[PROGRESS] COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} records fetched`);
       this.currentProgress = {
         type: 'complete',
         totalAssets: assets.length,
@@ -403,7 +408,7 @@ export class DataFetcherService extends EventEmitter {
       }
 
       // Emit start event
-      console.log(`[PROGRESS] INCREMENTAL START: 0/${assets.length} assets`);
+      logger.info(`[PROGRESS] INCREMENTAL START: 0/${assets.length} assets`);
       this.currentProgress = {
         type: 'start',
         totalAssets: assets.length,
@@ -422,7 +427,12 @@ export class DataFetcherService extends EventEmitter {
         this.getConcurrencyLimit(),
         (currentSymbol: string, processed: number) => {
           // Emit progress event for each asset
-          console.log(`[PROGRESS] INCREMENTAL ${processed}/${assets.length} - Current: ${currentSymbol} (${Math.round((processed / assets.length) * 100)}%)`);
+          logger.debug('[PROGRESS] Incremental fetch progress', {
+            processed,
+            total: assets.length,
+            currentSymbol,
+            percentage: Math.round((processed / assets.length) * 100),
+          });
           this.currentProgress = {
             type: 'progress',
             totalAssets: assets.length,
@@ -500,7 +510,9 @@ export class DataFetcherService extends EventEmitter {
       );
 
       // Emit completion event
-      console.log(`[PROGRESS] INCREMENTAL COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} new records fetched`);
+      logger.info(
+        `[PROGRESS] INCREMENTAL COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} new records fetched`
+      );
       this.currentProgress = {
         type: 'complete',
         totalAssets: assets.length,

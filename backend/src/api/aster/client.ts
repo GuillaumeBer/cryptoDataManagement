@@ -136,7 +136,6 @@ export class AsterClient {
       return results;
     } catch (error: any) {
       const errorMsg = this.getErrorMessage(error);
-      console.error(`Failed to fetch funding history for ${symbol}:`, errorMsg);
       logger.error(`Failed to fetch funding history for ${symbol}: ${errorMsg}`);
       throw new Error(`Failed to fetch funding history for ${symbol}: ${errorMsg}`);
     }
@@ -165,13 +164,13 @@ export class AsterClient {
       symbols,
       async (symbol) => {
         try {
-          console.log(`[API] Fetching ${symbol} from Aster...`);
+          logger.info(`[API] Fetching ${symbol} from Aster...`);
           const data = await this.getFundingHistory(symbol);
           results.set(symbol, data);
-          console.log(`[API] ✓ ${symbol}: ${data.length} records`);
+          logger.info(`[API] ✓ ${symbol}: ${data.length} records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
-          console.log(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch funding history for ${symbol}`, errorMsg);
           results.set(symbol, []);
         } finally {

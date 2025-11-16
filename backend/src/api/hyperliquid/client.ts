@@ -84,7 +84,6 @@ export class HyperliquidClient {
       return results;
     } catch (error: any) {
       const errorDetails = error.response?.data ? JSON.stringify(error.response.data) : error.message;
-      console.error(`Failed to fetch funding history for ${coin}:`, errorDetails);
       logger.error(`Failed to fetch funding history for ${coin}: ${errorDetails}`);
       throw new Error(`Failed to fetch funding history for ${coin}: ${errorDetails}`);
     }
@@ -110,12 +109,12 @@ export class HyperliquidClient {
       coins,
       async (coin) => {
         try {
-          console.log(`[API] Fetching ${coin}...`);
+          logger.info(`[API] Fetching ${coin}...`);
           const data = await this.getFundingHistory(coin);
           results.set(coin, data);
-          console.log(`[API] ✓ ${coin}: ${data.length} records`);
+          logger.info(`[API] ✓ ${coin}: ${data.length} records`);
         } catch (error) {
-          console.log(`[API] ✗ ${coin}: FAILED`);
+          logger.error(`[API] ✗ ${coin}: FAILED`);
           logger.error(`Failed to fetch funding history for ${coin}`, error);
           results.set(coin, []);
         } finally {

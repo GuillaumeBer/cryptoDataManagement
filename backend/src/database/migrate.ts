@@ -98,11 +98,11 @@ async function runMigrations() {
 if (require.main === module) {
   runMigrations()
     .then(() => {
-      console.log('✓ Migrations completed');
+      logger.info('✓ Migrations completed');
       process.exit(0);
     })
     .catch((error) => {
-      console.error('✗ Migration failed:', error);
+      logger.error('✗ Migration failed:', error);
       process.exit(1);
     });
 }

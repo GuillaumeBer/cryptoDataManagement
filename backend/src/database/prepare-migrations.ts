@@ -44,12 +44,12 @@ async function prepareMigrations() {
 if (require.main === module) {
   prepareMigrations()
     .then(() => {
-      console.log('✓ Migration preparation completed');
-      console.log('Now run: npm run db:migrate');
+      logger.info('✓ Migration preparation completed');
+      logger.info('Now run: npm run db:migrate');
       process.exit(0);
     })
     .catch((error) => {
-      console.error('✗ Migration preparation failed:', error);
+      logger.error('✗ Migration preparation failed:', error);
       process.exit(1);
     });
 }

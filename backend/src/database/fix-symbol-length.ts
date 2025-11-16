@@ -29,7 +29,9 @@ async function fixSymbolLength() {
     `);
 
     if (result.rows.length > 0) {
-      console.log(`\n✓ Symbol column is now: VARCHAR(${result.rows[0].character_maximum_length})\n`);
+      logger.info('Symbol column updated', {
+        character_maximum_length: result.rows[0].character_maximum_length,
+      });
     }
   } catch (error) {
     logger.error('Fix failed', error);
@@ -43,11 +45,11 @@ async function fixSymbolLength() {
 if (require.main === module) {
   fixSymbolLength()
     .then(() => {
-      console.log('✓ Fix completed - symbol column is now VARCHAR(100)');
+      logger.info('✓ Fix completed - symbol column is now VARCHAR(100)');
       process.exit(0);
     })
     .catch((error) => {
-      console.error('✗ Fix failed:', error);
+      logger.error('✗ Fix failed:', error);
       process.exit(1);
     });
 }
