@@ -6,6 +6,7 @@ module.exports = {
   testMatch: ['**/*.test.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
   clearMocks: true,
+  setupFilesAfterEnv: ['<rootDir>/src/tests/setup-db.ts'],
   transform: {
     '^.+\\.ts$': 'ts-jest',
   },

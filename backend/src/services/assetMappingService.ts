@@ -1,11 +1,7 @@
 import AssetRepository from '../models/AssetRepository';
 import UnifiedAssetRepository from '../models/UnifiedAssetRepository';
 import AssetMappingRepository from '../models/AssetMappingRepository';
-import {
-  normalizeSymbol,
-  groupAssetsByNormalizedSymbol,
-  isSameAsset,
-} from '../utils/symbolNormalization';
+import { groupAssetsByNormalizedSymbol } from '../utils/symbolNormalization';
 import { logger } from '../utils/logger';
 
 export class AssetMappingService {
@@ -14,7 +10,7 @@ export class AssetMappingService {
    * @param priceValidation - If true, compare prices to validate matches (not implemented yet)
    * @returns Number of mappings created
    */
-  async generateMappings(priceValidation: boolean = false): Promise<{
+  async generateMappings(_priceValidation: boolean = false): Promise<{
     unifiedAssetsCreated: number;
     mappingsCreated: number;
   }> {
@@ -82,7 +78,6 @@ export class AssetMappingService {
               asset_id: asset.id,
               confidence_score: confidenceScore,
               mapping_method: 'auto_symbol',
-              price_used: null, // Price validation not implemented yet
             });
 
             mappingsCreated++;
@@ -118,9 +113,8 @@ export class AssetMappingService {
   private calculateConfidenceScore(
     originalSymbol: string,
     normalizedSymbol: string,
-    platform: string
+    _platform: string
   ): number {
-    let score = 100;
 
     // Exact match = 100
     if (originalSymbol.toUpperCase() === normalizedSymbol) {

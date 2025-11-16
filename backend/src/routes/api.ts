@@ -5,7 +5,6 @@ import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
 import UnifiedAssetRepository from '../models/UnifiedAssetRepository';
-import AssetMappingRepository from '../models/AssetMappingRepository';
 import assetMappingService from '../services/assetMappingService';
 import { logger } from '../utils/logger';
 import createProgressStream from './createProgressStream';
@@ -88,7 +87,7 @@ router.post('/fetch/incremental', async (req: Request, res: Response) => {
  * POST /api/resample/hyperliquid-8h
  * Resample Hyperliquid 1-hour data to 8-hour intervals for comparison with Binance
  */
-router.post('/resample/hyperliquid-8h', async (req: Request, res: Response) => {
+router.post('/resample/hyperliquid-8h', async (_req: Request, res: Response) => {
   try {
     logger.info('Resampling Hyperliquid data to 8-hour intervals');
 
@@ -266,13 +265,13 @@ router.get('/analytics/:asset', async (req: Request, res: Response) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: analytics,
     });
   } catch (error) {
     logger.error('Analytics endpoint error', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch analytics',
       error: `${error}`,
@@ -309,7 +308,7 @@ router.get('/logs', async (req: Request, res: Response) => {
  * GET /api/health
  * Health check endpoint
  */
-router.get('/health', (req: Request, res: Response) => {
+router.get('/health', (_req: Request, res: Response) => {
   const schedulerStatus = getSchedulerStatus();
   res.json({
     success: true,
@@ -323,18 +322,18 @@ router.get('/health', (req: Request, res: Response) => {
  * GET /api/unified-assets
  * Get all unified assets with their platform mappings
  */
-router.get('/unified-assets', async (req: Request, res: Response) => {
+router.get('/unified-assets', async (_req: Request, res: Response) => {
   try {
     const unifiedAssets = await UnifiedAssetRepository.findAllWithMappings();
 
-    res.json({
+    return res.json({
       success: true,
       data: unifiedAssets,
       count: unifiedAssets.length,
     });
   } catch (error) {
     logger.error('Unified assets endpoint error', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch unified assets',
       error: `${error}`,
@@ -358,13 +357,13 @@ router.get('/unified-assets/:id', async (req: Request, res: Response) => {
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       data: unifiedAsset,
     });
   } catch (error) {
     logger.error('Unified asset endpoint error', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to fetch unified asset',
       error: `${error}`,
@@ -376,20 +375,20 @@ router.get('/unified-assets/:id', async (req: Request, res: Response) => {
  * POST /api/unified-assets/generate-mappings
  * Generate asset mappings across all platforms
  */
-router.post('/unified-assets/generate-mappings', async (req: Request, res: Response) => {
+router.post('/unified-assets/generate-mappings', async (_req: Request, res: Response) => {
   try {
     logger.info('Generating asset mappings');
 
     const result = await assetMappingService.generateMappings();
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Asset mappings generated',
       data: result,
     });
   } catch (error) {
     logger.error('Generate mappings endpoint error', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to generate mappings',
       error: `${error}`,
@@ -414,13 +413,13 @@ router.post('/unified-assets/manual-mapping', async (req: Request, res: Response
 
     const result = await assetMappingService.createManualMapping(assetId, normalizedSymbol);
 
-    res.json({
+    return res.json({
       success: result,
       message: result ? 'Manual mapping created' : 'Failed to create manual mapping',
     });
   } catch (error) {
     logger.error('Manual mapping endpoint error', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to create manual mapping',
       error: `${error}`,
