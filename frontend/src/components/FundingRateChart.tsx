@@ -1,12 +1,17 @@
 import { useState, useMemo } from 'react';
 import { useFundingRates } from '../hooks/useApi';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts';
-import { formatDate } from '../utils/formatters';
+import { formatDate, formatPercentage } from '../utils/formatters';
 
 interface FundingRateChartProps {
   asset: string;
   platform: string;
 }
+
+const fractionToPercentValue = (value: number | string) => {
+  const numericValue = typeof value === 'string' ? parseFloat(value) : value;
+  return numericValue * 100;
+};
 
 export default function FundingRateChart({ asset, platform }: FundingRateChartProps) {
   const [dateRange, setDateRange] = useState<'7d' | '14d' | '30d' | 'all'>('7d');
@@ -94,7 +99,7 @@ export default function FundingRateChart({ asset, platform }: FundingRateChartPr
     .reverse()
     .map((rate) => ({
       timestamp: new Date(rate.timestamp).getTime(),
-      fundingRate: parseFloat(rate.funding_rate) * 100, // Convert to percentage
+      fundingRate: fractionToPercentValue(rate.funding_rate),
       formattedDate: formatDate(rate.timestamp, 'MMM dd HH:mm'),
     }));
 
@@ -134,12 +139,12 @@ export default function FundingRateChart({ asset, platform }: FundingRateChartPr
               tickFormatter={(timestamp) => formatDate(new Date(timestamp), 'MMM dd')}
             />
             <YAxis
-              tickFormatter={(value) => `${value.toFixed(3)}%`}
+              tickFormatter={(value) => formatPercentage(value, 3)}
               label={{ value: 'Funding Rate (%)', angle: -90, position: 'insideLeft' }}
             />
             <Tooltip
               labelFormatter={(timestamp) => formatDate(new Date(timestamp), 'MMM dd, yyyy HH:mm')}
-              formatter={(value: number) => [`${value.toFixed(4)}%`, 'Funding Rate']}
+              formatter={(value: number) => [formatPercentage(value, 4), 'Funding Rate']}
             />
             <Legend />
             <ReferenceLine y={0} stroke="#64748b" strokeDasharray="3 3" strokeWidth={2} label={{ value: '0%', position: 'right' }} />

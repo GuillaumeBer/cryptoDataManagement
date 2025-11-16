@@ -1,5 +1,5 @@
 import { useAssetAnalytics } from '../hooks/useApi';
-import { formatPercentage, formatDate } from '../utils/formatters';
+import { formatPercentage, formatDate, formatFractionToPercent } from '../utils/formatters';
 
 interface AnalyticsProps {
   asset: string;
@@ -63,10 +63,10 @@ export default function Analytics({ asset, platform }: AnalyticsProps) {
         <div className="border border-gray-200 rounded-lg p-4">
           <p className="text-xs text-gray-500 mb-1">Average Rate (8h)</p>
           <p className={`text-2xl font-bold ${parseFloat(data.avg_funding_rate) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {formatPercentage(data.avg_funding_rate)}
+            {formatFractionToPercent(data.avg_funding_rate)}
           </p>
           <p className="text-xs text-gray-500 mt-1">
-            ({(annualizedRate * 100).toFixed(2)}% annualized)
+            ({formatFractionToPercent(annualizedRate, 2)} annualized)
           </p>
         </div>
 
@@ -74,7 +74,7 @@ export default function Analytics({ asset, platform }: AnalyticsProps) {
         <div className="border border-gray-200 rounded-lg p-4">
           <p className="text-xs text-gray-500 mb-1">Min Rate</p>
           <p className="text-2xl font-bold text-red-600">
-            {formatPercentage(data.min_funding_rate)}
+            {formatFractionToPercent(data.min_funding_rate)}
           </p>
         </div>
 
@@ -82,7 +82,7 @@ export default function Analytics({ asset, platform }: AnalyticsProps) {
         <div className="border border-gray-200 rounded-lg p-4">
           <p className="text-xs text-gray-500 mb-1">Max Rate</p>
           <p className="text-2xl font-bold text-green-600">
-            {formatPercentage(data.max_funding_rate)}
+            {formatFractionToPercent(data.max_funding_rate)}
           </p>
         </div>
 
@@ -90,7 +90,7 @@ export default function Analytics({ asset, platform }: AnalyticsProps) {
         <div className="border border-gray-200 rounded-lg p-4">
           <p className="text-xs text-gray-500 mb-1">Std Dev</p>
           <p className="text-2xl font-bold text-gray-900">
-            {formatPercentage(data.std_dev)}
+            {formatFractionToPercent(data.std_dev)}
           </p>
         </div>
 
@@ -98,7 +98,7 @@ export default function Analytics({ asset, platform }: AnalyticsProps) {
         <div className="border border-gray-200 rounded-lg p-4">
           <p className="text-xs text-gray-500 mb-1">Positive Rate</p>
           <p className="text-2xl font-bold text-green-600">
-            {positivePercentage.toFixed(1)}%
+            {formatPercentage(positivePercentage, 1)}
           </p>
           <p className="text-xs text-gray-400 mt-1">
             {data.positive_count} records
@@ -108,7 +108,7 @@ export default function Analytics({ asset, platform }: AnalyticsProps) {
         <div className="border border-gray-200 rounded-lg p-4">
           <p className="text-xs text-gray-500 mb-1">Negative Rate</p>
           <p className="text-2xl font-bold text-red-600">
-            {negativePercentage.toFixed(1)}%
+            {formatPercentage(negativePercentage, 1)}
           </p>
           <p className="text-xs text-gray-400 mt-1">
             {data.negative_count} records
