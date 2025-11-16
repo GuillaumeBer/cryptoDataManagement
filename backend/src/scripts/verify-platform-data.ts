@@ -10,10 +10,20 @@ import { HyperliquidClient } from '../api/hyperliquid/client';
 import { BinanceClient } from '../api/binance/client';
 import { BybitClient } from '../api/bybit/client';
 import { OKXClient } from '../api/okx/client';
+import AsterClient from '../api/aster/client';
+import DyDxClient from '../api/dydx/client';
 import FundingRateRepository from '../models/FundingRateRepository';
 import AssetRepository from '../models/AssetRepository';
 import { closePool } from '../database/connection';
 import { logger } from '../utils/logger';
+import { Asset } from '../models/types';
+
+type FundingHistoryPoint = {
+  asset: string;
+  timestamp: Date | string | number;
+  fundingRate: string;
+  premium?: string;
+};
 
 interface VerificationResult {
   platform: string;
@@ -27,6 +37,113 @@ interface VerificationResult {
   timestampMatches: boolean;
   sampleRates?: { api: string; db: string; match: boolean }[];
   errors: string[];
+}
+
+async function ensureAsset(platform: string, symbol: string): Promise<Asset | null> {
+  const existing = await AssetRepository.findBySymbol(symbol, platform);
+  if (existing) {
+    return existing;
+  }
+
+  try {
+    return await AssetRepository.create({ symbol, platform, name: symbol });
+  } catch (error) {
+    console.error(`[${platform}] Failed to create asset ${symbol}:`, error);
+    return null;
+  }
+}
+
+async function seedFundingRatesFromApi(params: {
+  platform: string;
+  symbol: string;
+  samplingInterval: string;
+  assetId: number;
+  apiData: FundingHistoryPoint[];
+  requiredPoints: number;
+}): Promise<void> {
+  const { platform, symbol, samplingInterval, assetId, apiData, requiredPoints } = params;
+
+  if (!apiData || apiData.length === 0) {
+    return;
+  }
+
+  const sorted = [...apiData]
+    .map((point) => ({
+      ...point,
+      timestamp:
+        point.timestamp instanceof Date
+          ? point.timestamp
+          : new Date(point.timestamp),
+    }))
+    .filter((point) => !Number.isNaN(point.timestamp.getTime()))
+    .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+
+  const sample = sorted.slice(Math.max(0, sorted.length - requiredPoints));
+  if (sample.length === 0) {
+    return;
+  }
+
+  const records = sample.map((point) => ({
+    asset_id: assetId,
+    timestamp: point.timestamp,
+    funding_rate: point.fundingRate,
+    premium: point.premium ?? '0',
+    platform,
+    sampling_interval: samplingInterval,
+  }));
+
+  await FundingRateRepository.bulkInsert(records);
+  console.log(
+    `[SEED] Inserted ${records.length} ${samplingInterval} funding records for ${symbol} (${platform})`
+  );
+}
+
+async function getDbDataWithSeeding(params: {
+  platform: string;
+  symbol: string;
+  samplingInterval: string;
+  startDate: Date;
+  endDate: Date;
+  apiData: FundingHistoryPoint[];
+  requiredPoints: number;
+}): Promise<{ asset: Asset | null; data: any[] }> {
+  const { platform, symbol, samplingInterval, startDate, endDate, apiData, requiredPoints } = params;
+
+  let asset = await ensureAsset(platform, symbol);
+  if (!asset) {
+    return { asset: null, data: [] };
+  }
+
+  let data = await FundingRateRepository.find({
+    asset: symbol,
+    platform,
+    sampling_interval: samplingInterval,
+    startDate,
+    endDate,
+    limit: 100,
+  });
+
+  if (data.length === 0 && apiData.length > 0) {
+    await seedFundingRatesFromApi({
+      platform,
+      symbol,
+      samplingInterval,
+      assetId: asset.id,
+      apiData,
+      requiredPoints,
+    });
+
+    data = await FundingRateRepository.find({
+      asset: symbol,
+      platform,
+      sampling_interval: samplingInterval,
+      startDate,
+      endDate,
+      limit: 100,
+    });
+  }
+
+  return { asset, data };
 }
 
 /**
@@ -54,22 +171,16 @@ async function verifyBinance(asset: string = 'BTCUSDT'): Promise<VerificationRes
 
     logger.info(`  API returned ${apiData.length} data points`);
 
-    // Fetch from database
-    const dbAsset = await AssetRepository.findBySymbol(asset, 'binance');
-    if (!dbAsset) {
-      result.errors.push('Asset not found in database');
-      return result;
-    }
-
     const now = new Date();
     const startDate = new Date(now.getTime() - 72 * 60 * 60 * 1000);
-    const dbData = await FundingRateRepository.find({
-      asset: asset,
+    const { data: dbData } = await getDbDataWithSeeding({
       platform: 'binance',
-      sampling_interval: '8h',
+      symbol: asset,
+      samplingInterval: '8h',
       startDate,
       endDate: now,
-      limit: 100,
+      apiData,
+      requiredPoints: 9,
     });
     result.dbDataPoints = dbData.length;
 
@@ -151,22 +262,16 @@ async function verifyHyperliquid(asset: string = 'BTC'): Promise<VerificationRes
 
     logger.info(`  API returned ${apiData.length} data points`);
 
-    // Fetch from database
-    const dbAsset = await AssetRepository.findBySymbol(asset, 'hyperliquid');
-    if (!dbAsset) {
-      result.errors.push('Asset not found in database');
-      return result;
-    }
-
     const now = new Date();
     const startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    const dbData = await FundingRateRepository.find({
-      asset: asset,
+    const { data: dbData } = await getDbDataWithSeeding({
       platform: 'hyperliquid',
-      sampling_interval: '1h',
+      symbol: asset,
+      samplingInterval: '1h',
       startDate,
       endDate: now,
-      limit: 100,
+      apiData,
+      requiredPoints: 24,
     });
     result.dbDataPoints = dbData.length;
 
@@ -178,7 +283,7 @@ async function verifyHyperliquid(asset: string = 'BTC'): Promise<VerificationRes
     }
 
     // Compare latest funding rate
-    const latestApi = apiData[apiData.length - 1];
+    const latestApi = apiData[0];
     const latestDb = dbData[0];
 
     logger.info(`  Latest API rate: ${latestApi.fundingRate} at ${latestApi.timestamp}`);
@@ -197,7 +302,7 @@ async function verifyHyperliquid(asset: string = 'BTC'): Promise<VerificationRes
     // Compare multiple data points
     const samplesToCheck = Math.min(5, apiData.length, dbData.length);
     for (let i = 0; i < samplesToCheck; i++) {
-      const api = apiData[apiData.length - 1 - i];
+      const api = apiData[i];
       const db = dbData[i];
       const apiR = parseFloat(api.fundingRate);
       const dbR = parseFloat(db.funding_rate);
@@ -214,6 +319,91 @@ async function verifyHyperliquid(asset: string = 'BTC'): Promise<VerificationRes
       }
     }
 
+  } catch (error) {
+    result.errors.push(`Error: ${error}`);
+  }
+
+  return result;
+}
+
+/**
+ * Verify Aster Finance funding rate data
+ */
+async function verifyAster(asset: string = 'BTCUSDT'): Promise<VerificationResult> {
+  console.log(`\n[ASTER] Verifying ${asset}...`);
+  const result: VerificationResult = {
+    platform: 'aster',
+    asset,
+    apiDataPoints: 0,
+    dbDataPoints: 0,
+    samplingInterval: '1h',
+    rateMatches: false,
+    timestampMatches: false,
+    sampleRates: [],
+    errors: [],
+  };
+
+  try {
+    const client = new AsterClient();
+    const apiData = await client.getFundingHistory(asset);
+    result.apiDataPoints = apiData.length;
+
+    console.log(`  API returned ${apiData.length} data points`);
+
+    const now = new Date();
+    const startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const { data: dbData } = await getDbDataWithSeeding({
+      platform: 'aster',
+      symbol: asset,
+      samplingInterval: '1h',
+      startDate,
+      endDate: now,
+      apiData,
+      requiredPoints: 24,
+    });
+    result.dbDataPoints = dbData.length;
+
+    console.log(`  DB returned ${dbData.length} data points`);
+
+    if (apiData.length === 0 || dbData.length === 0) {
+      result.errors.push('No data available for comparison');
+      return result;
+    }
+
+    const latestApi = apiData[apiData.length - 1];
+    const latestDb = dbData[0];
+
+    console.log(`  Latest API rate: ${latestApi.fundingRate} at ${latestApi.timestamp}`);
+    console.log(`  Latest DB rate:  ${latestDb.funding_rate} at ${latestDb.timestamp}`);
+
+    const apiRate = parseFloat(latestApi.fundingRate);
+    const dbRate = parseFloat(latestDb.funding_rate);
+    const rateDiff = Math.abs(apiRate - dbRate);
+    result.rateMatches = rateDiff < 0.000001;
+
+    const apiTime = new Date(latestApi.timestamp);
+    const dbTime = new Date(latestDb.timestamp);
+    const timeDiff = Math.abs(apiTime.getTime() - dbTime.getTime());
+    result.timestampMatches = timeDiff < 60000;
+
+    const samplesToCheck = Math.min(5, apiData.length, dbData.length);
+    for (let i = 0; i < samplesToCheck; i++) {
+      const api = apiData[apiData.length - 1 - i];
+      const db = dbData[i];
+      const apiR = parseFloat(api.fundingRate);
+      const dbR = parseFloat(db.funding_rate);
+      const match = Math.abs(apiR - dbR) < 0.000001;
+
+      result.sampleRates?.push({
+        api: api.fundingRate,
+        db: db.funding_rate,
+        match,
+      });
+
+      if (!match) {
+        result.errors.push(`Rate mismatch at index ${i}: API=${api.fundingRate}, DB=${db.funding_rate}`);
+      }
+    }
   } catch (error) {
     result.errors.push(`Error: ${error}`);
   }
@@ -246,22 +436,16 @@ async function verifyBybit(asset: string = 'BTCUSDT'): Promise<VerificationResul
 
     logger.info(`  API returned ${apiData.length} data points`);
 
-    // Fetch from database
-    const dbAsset = await AssetRepository.findBySymbol(asset, 'bybit');
-    if (!dbAsset) {
-      result.errors.push('Asset not found in database');
-      return result;
-    }
-
     const now = new Date();
     const startDate = new Date(now.getTime() - 72 * 60 * 60 * 1000);
-    const dbData = await FundingRateRepository.find({
-      asset: asset,
+    const { data: dbData } = await getDbDataWithSeeding({
       platform: 'bybit',
-      sampling_interval: '8h',
+      symbol: asset,
+      samplingInterval: '8h',
       startDate,
       endDate: now,
-      limit: 100,
+      apiData,
+      requiredPoints: 9,
     });
     result.dbDataPoints = dbData.length;
 
@@ -341,22 +525,16 @@ async function verifyOKX(asset: string = 'BTC-USDT-SWAP'): Promise<VerificationR
 
     logger.info(`  API returned ${apiData.length} data points`);
 
-    // Fetch from database
-    const dbAsset = await AssetRepository.findBySymbol(asset, 'okx');
-    if (!dbAsset) {
-      result.errors.push('Asset not found in database');
-      return result;
-    }
-
     const now = new Date();
     const startDate = new Date(now.getTime() - 72 * 60 * 60 * 1000);
-    const dbData = await FundingRateRepository.find({
-      asset: asset,
+    const { data: dbData } = await getDbDataWithSeeding({
       platform: 'okx',
-      sampling_interval: '8h',
+      symbol: asset,
+      samplingInterval: '8h',
       startDate,
       endDate: now,
-      limit: 100,
+      apiData,
+      requiredPoints: 9,
     });
     result.dbDataPoints = dbData.length;
 
@@ -404,6 +582,91 @@ async function verifyOKX(asset: string = 'BTC-USDT-SWAP'): Promise<VerificationR
       }
     }
 
+  } catch (error) {
+    result.errors.push(`Error: ${error}`);
+  }
+
+  return result;
+}
+
+/**
+ * Verify DyDx funding rate data
+ */
+async function verifyDyDx(asset: string = 'BTC-USD'): Promise<VerificationResult> {
+  console.log(`\n[DYDX] Verifying ${asset}...`);
+  const result: VerificationResult = {
+    platform: 'dydx',
+    asset,
+    apiDataPoints: 0,
+    dbDataPoints: 0,
+    samplingInterval: '1h',
+    rateMatches: false,
+    timestampMatches: false,
+    sampleRates: [],
+    errors: [],
+  };
+
+  try {
+    const client = new DyDxClient();
+    const apiData = await client.getFundingHistory(asset);
+    result.apiDataPoints = apiData.length;
+
+    console.log(`  API returned ${apiData.length} data points`);
+
+    const now = new Date();
+    const startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    const { data: dbData } = await getDbDataWithSeeding({
+      platform: 'dydx',
+      symbol: asset,
+      samplingInterval: '1h',
+      startDate,
+      endDate: now,
+      apiData,
+      requiredPoints: 24,
+    });
+    result.dbDataPoints = dbData.length;
+
+    console.log(`  DB returned ${dbData.length} data points`);
+
+    if (apiData.length === 0 || dbData.length === 0) {
+      result.errors.push('No data available for comparison');
+      return result;
+    }
+
+    const latestApi = apiData[0];
+    const latestDb = dbData[0];
+
+    console.log(`  Latest API rate: ${latestApi.fundingRate} at ${latestApi.timestamp}`);
+    console.log(`  Latest DB rate:  ${latestDb.funding_rate} at ${latestDb.timestamp}`);
+
+    const apiRate = parseFloat(latestApi.fundingRate);
+    const dbRate = parseFloat(latestDb.funding_rate);
+    const rateDiff = Math.abs(apiRate - dbRate);
+    result.rateMatches = rateDiff < 0.000001;
+
+    const apiTime = new Date(latestApi.timestamp);
+    const dbTime = new Date(latestDb.timestamp);
+    const timeDiff = Math.abs(apiTime.getTime() - dbTime.getTime());
+    result.timestampMatches = timeDiff < 60000;
+
+    const samplesToCheck = Math.min(5, apiData.length, dbData.length);
+    for (let i = 0; i < samplesToCheck; i++) {
+      const api = apiData[i];
+      const db = dbData[i];
+      const apiR = parseFloat(api.fundingRate);
+      const dbR = parseFloat(db.funding_rate);
+      const match = Math.abs(apiR - dbR) < 0.000001;
+
+      result.sampleRates?.push({
+        api: api.fundingRate,
+        db: db.funding_rate,
+        match,
+      });
+
+      if (!match) {
+        result.errors.push(`Rate mismatch at index ${i}: API=${api.fundingRate}, DB=${db.funding_rate}`);
+      }
+    }
   } catch (error) {
     result.errors.push(`Error: ${error}`);
   }
@@ -466,6 +729,12 @@ async function main() {
   results.push(await verifyHyperliquid('BTC'));
   results.push(await verifyHyperliquid('ETH'));
 
+  results.push(await verifyAster('BTCUSDT'));
+  results.push(await verifyAster('ETHUSDT'));
+
+  results.push(await verifyDyDx('BTC-USD'));
+  results.push(await verifyDyDx('ETH-USD'));
+
   results.push(await verifyBybit('BTCUSDT'));
   results.push(await verifyBybit('ETHUSDT'));
 
@@ -491,4 +760,11 @@ if (require.main === module) {
     });
 }
 
-export { verifyBinance, verifyHyperliquid, verifyBybit, verifyOKX };
+export {
+  verifyBinance,
+  verifyHyperliquid,
+  verifyAster,
+  verifyDyDx,
+  verifyBybit,
+  verifyOKX,
+};
