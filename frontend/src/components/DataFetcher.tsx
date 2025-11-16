@@ -154,7 +154,7 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
       );
     }
 
-    if (current?.phase === 'resample' && current.type !== 'error' && current.type !== 'complete') {
+    if (current && current.phase === 'resample' && current.type !== 'complete') {
       return (
         <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded">
           <p className="text-sm text-purple-800">{current.message ?? 'Generating 8-hour aggregated data...'}</p>

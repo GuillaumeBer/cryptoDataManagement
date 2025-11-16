@@ -6,7 +6,22 @@ import Analytics from './Analytics';
 import DataFetcher from './DataFetcher';
 import StatusBar from './StatusBar';
 import SchedulerWidget from './SchedulerWidget';
+import AssetCoverageView from './AssetCoverageView';
 import { PLATFORMS, type Platform } from '../constants/platforms';
+
+const METRICS_ROADMAP = [
+  { id: 'funding', label: 'Funding rate', state: 'Live now' },
+  { id: 'oi', label: 'Open interest', state: 'Designing' },
+  { id: 'volume', label: 'Perpetual volume', state: 'Planned' },
+  { id: 'ohlcv', label: 'OHLCV', state: 'Exploring' },
+];
+
+const badgeStyles: Record<string, string> = {
+  'Live now': 'border-green-200 bg-green-50 text-green-700',
+  Designing: 'border-blue-200 bg-blue-50 text-blue-700',
+  Planned: 'border-yellow-200 bg-yellow-50 text-yellow-700',
+  Exploring: 'border-gray-200 bg-gray-50 text-gray-600',
+};
 
 export default function Dashboard() {
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('hyperliquid');
@@ -17,10 +32,15 @@ export default function Dashboard() {
     error: statusError,
   } = useSystemStatus(selectedPlatform);
   const {
-    data: assets,
+    data: platformAssets,
     isLoading: isAssetsLoading,
     error: assetsError,
   } = useAssets(selectedPlatform);
+  const {
+    data: allAssets,
+    isLoading: isAllAssetsLoading,
+    error: allAssetsError,
+  } = useAssets();
 
   // Reset selected asset when switching platforms
   const handlePlatformChange = (platform: Platform) => {
@@ -32,13 +52,26 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <h1 className="text-3xl font-bold text-gray-900">
-            Crypto Data Management
-          </h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Historical funding rate data from multiple platforms
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <h1 className="text-3xl font-bold text-gray-900">Crypto Data Management</h1>
+          <p className="mt-2 text-sm text-gray-600 max-w-3xl">
+            Operate a unified data plane for every derivatives venue. Funding rates are live today, while the layout
+            already anticipates open interest, volume, OHLCV and other metrics so controls stay familiar as coverage
+            expands.
           </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {METRICS_ROADMAP.map((metric) => (
+              <span
+                key={metric.id}
+                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${
+                  badgeStyles[metric.state]
+                }`}
+              >
+                <span className="uppercase tracking-wide text-[10px] text-gray-500">{metric.state}</span>
+                <span className="text-gray-900 capitalize">{metric.label}</span>
+              </span>
+            ))}
+          </div>
         </div>
       </header>
 
@@ -46,85 +79,116 @@ export default function Dashboard() {
       <StatusBar status={status} isLoading={isStatusLoading} error={statusError} />
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <SchedulerWidget scheduler={status?.scheduler} recentErrors={status?.recentErrors} />
-        {/* Platform Tabs */}
-        <div className="mb-8 bg-white rounded-lg shadow">
-          <div className="border-b border-gray-200">
-            <nav className="-mb-px flex space-x-8 px-6" aria-label="Tabs">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-12">
+        {/* Global overview */}
+        <section>
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Global overview</p>
+              <h2 className="text-2xl font-semibold text-gray-900 mt-1">Scheduling & coverage</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Everything in this row is platform-agnostic. Use it to audit ingestion health and to view assets across
+                all venues.
+              </p>
+            </div>
+          </div>
+          <div className="mt-6 grid gap-6 lg:grid-cols-3">
+            <div className="lg:col-span-1">
+              <SchedulerWidget scheduler={status?.scheduler} recentErrors={status?.recentErrors} />
+            </div>
+            <div className="lg:col-span-2">
+              <AssetCoverageView
+                assets={allAssets}
+                isLoading={isAllAssetsLoading}
+                error={allAssetsError}
+              />
+            </div>
+          </div>
+        </section>
+
+        {/* Platform workspace */}
+        <section>
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Platform workspace</p>
+              <h2 className="text-2xl font-semibold text-gray-900 mt-1">Venue-specific exploration</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Choose a venue to run fetches, browse its instruments and dive deep into funding analytics.
+              </p>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-100 px-4 py-3 text-right">
+              <p className="text-xs uppercase tracking-wide text-gray-500">Currently viewing</p>
+              <p className="text-base font-semibold text-gray-900 capitalize">{selectedPlatform}</p>
+            </div>
+          </div>
+
+          {/* Platform Tabs */}
+          <div className="mt-6 bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
+            <nav className="flex flex-wrap gap-2" aria-label="Platform tabs">
               {PLATFORMS.map((platform) => (
                 <button
                   key={platform.id}
                   onClick={() => platform.enabled && handlePlatformChange(platform.id)}
                   disabled={!platform.enabled}
-                  className={`
-                    whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm
-                    ${selectedPlatform === platform.id
-                      ? 'border-blue-500 text-blue-600'
+                  className={`px-4 py-2 rounded-full border text-sm font-medium transition-colors ${
+                    selectedPlatform === platform.id
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
                       : platform.enabled
-                      ? 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                      : 'border-transparent text-gray-300 cursor-not-allowed'
-                    }
-                  `}
+                      ? 'border-gray-200 text-gray-600 hover:text-gray-900'
+                      : 'border-dashed border-gray-200 text-gray-300 cursor-not-allowed'
+                  }`}
                 >
                   {platform.name}
                   {!platform.enabled && (
-                    <span className="ml-2 text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
-                      Soon
-                    </span>
+                    <span className="ml-2 text-[10px] uppercase tracking-wide">Soon</span>
                   )}
                 </button>
               ))}
             </nav>
+
+            <div className="mt-6 grid gap-6 lg:grid-cols-5">
+              <div className="lg:col-span-2 space-y-6">
+                <AssetSelector
+                  assets={platformAssets || []}
+                  isLoading={isAssetsLoading}
+                  error={assetsError}
+                  selectedAsset={selectedAsset}
+                  onSelectAsset={setSelectedAsset}
+                />
+              </div>
+              <div className="lg:col-span-3 space-y-6">
+                <DataFetcher platform={selectedPlatform} selectedAsset={selectedAsset} />
+                {selectedAsset ? (
+                  <>
+                    <Analytics asset={selectedAsset} platform={selectedPlatform} />
+                    <FundingRateChart asset={selectedAsset} platform={selectedPlatform} />
+                  </>
+                ) : (
+                  <div className="text-center py-12 bg-white rounded-lg shadow border border-dashed border-gray-200">
+                    <svg
+                      className="mx-auto h-12 w-12 text-gray-300"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+                      />
+                    </svg>
+                    <h3 className="mt-3 text-base font-medium text-gray-900">Select an asset to explore</h3>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Use the platform asset list on the left to open analytics and charts. The asset coverage widget
+                      above shows what is available across every venue.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
-
-        {/* Data Fetcher Section */}
-        <div className="mb-8">
-          <DataFetcher platform={selectedPlatform} selectedAsset={selectedAsset} />
-        </div>
-
-        {/* Asset Selection */}
-        <div className="mb-8">
-          <AssetSelector
-            assets={assets || []}
-            isLoading={isAssetsLoading}
-            error={assetsError}
-            selectedAsset={selectedAsset}
-            onSelectAsset={setSelectedAsset}
-          />
-        </div>
-
-        {/* Charts and Analytics */}
-        {selectedAsset && (
-          <div className="space-y-8">
-            <Analytics asset={selectedAsset} platform={selectedPlatform} />
-            <FundingRateChart asset={selectedAsset} platform={selectedPlatform} />
-          </div>
-        )}
-
-        {/* No Asset Selected State */}
-        {!selectedAsset && (
-          <div className="text-center py-12 bg-white rounded-lg shadow">
-            <svg
-              className="mx-auto h-12 w-12 text-gray-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-              />
-            </svg>
-            <h3 className="mt-2 text-sm font-medium text-gray-900">No asset selected</h3>
-            <p className="mt-1 text-sm text-gray-500">
-              Select an asset above to view funding rate data and analytics
-            </p>
-          </div>
-        )}
+        </section>
       </main>
     </div>
   );
