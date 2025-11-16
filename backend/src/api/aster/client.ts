@@ -6,6 +6,8 @@ import {
   AsterExchangeInfo,
   AsterFundingRate,
   FetchedFundingData,
+  AsterKline,
+  FetchedOHLCVData,
 } from './types';
 
 export class AsterClient {
@@ -189,6 +191,116 @@ export class AsterClient {
       0
     );
     logger.info(`Fetched total of ${totalRecords} funding rate records from Aster`);
+
+    return results;
+  }
+
+  /**
+   * Fetch OHLCV (kline) history for a specific symbol
+   * Endpoint: GET /klines (similar to Binance)
+   *
+   * API Documentation:
+   * - Aster API is similar to Binance Futures API
+   * - Max limit: 1500 records per request
+   * - Interval: "1h" for 1-hour candles
+   *
+   * Rate Limits:
+   * - Conservative approach: 100ms delay
+   */
+  async getOHLCV(symbol: string, interval: string = '1h'): Promise<FetchedOHLCVData[]> {
+    try {
+      logger.debug(`Fetching OHLCV history for ${symbol} from Aster`);
+
+      // Calculate time range: 480 hours ago to match funding rate depth
+      const hoursAgo = 480;
+      const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
+      const endTime = Date.now();
+
+      const response = await this.client.get<AsterKline[]>('/klines', {
+        params: {
+          symbol,
+          interval,
+          startTime,
+          endTime,
+          limit: 1500, // Max allowed (similar to Binance)
+        },
+      });
+
+      const klines = response.data;
+      if (!klines || !Array.isArray(klines)) {
+        logger.warn(`No OHLCV data found for ${symbol}`);
+        return [];
+      }
+
+      const results: FetchedOHLCVData[] = klines.map((kline) => ({
+        asset: symbol,
+        timestamp: new Date(kline[0]),
+        open: kline[1],
+        high: kline[2],
+        low: kline[3],
+        close: kline[4],
+        volume: kline[5],
+        quoteVolume: '0', // Aster might not provide quote volume, using 0 as placeholder
+        tradesCount: kline[7],
+      }));
+
+      logger.debug(`Fetched ${results.length} OHLCV records for ${symbol}`);
+      return results;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch OHLCV for ${symbol}: ${errorMsg}`);
+      throw new Error(`Failed to fetch OHLCV for ${symbol}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch OHLCV history for multiple symbols with rate limiting
+   *
+   * Aster Rate Limits:
+   * - Conservative delay: 100ms to match funding rate fetching pattern
+   */
+  async getOHLCVBatch(
+    symbols: string[],
+    interval: string = '1h',
+    delayMs: number = 100,
+    concurrency: number = 5,
+    onProgress?: (currentSymbol: string, processed: number) => void
+  ): Promise<Map<string, FetchedOHLCVData[]>> {
+    const results = new Map<string, FetchedOHLCVData[]>();
+
+    logger.info(`Fetching OHLCV data for ${symbols.length} assets from Aster`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      symbols,
+      async (symbol) => {
+        try {
+          logger.info(`[API] Fetching OHLCV ${symbol} from Aster...`);
+          const data = await this.getOHLCV(symbol, interval);
+          results.set(symbol, data);
+          logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
+          results.set(symbol, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(symbol, processed);
+          }
+        }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
+
+    const totalRecords = Array.from(results.values()).reduce(
+      (sum, data) => sum + data.length,
+      0
+    );
+    logger.info(`Fetched total of ${totalRecords} OHLCV records from Aster`);
 
     return results;
   }

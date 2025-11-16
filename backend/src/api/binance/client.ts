@@ -6,6 +6,8 @@ import {
   BinanceExchangeInfo,
   BinanceFundingRate,
   FetchedFundingData,
+  BinanceKline,
+  FetchedOHLCVData,
 } from './types';
 
 export class BinanceClient {
@@ -175,6 +177,121 @@ export class BinanceClient {
       0
     );
     logger.info(`Fetched total of ${totalRecords} funding rate records from Binance Futures`);
+
+    return results;
+  }
+
+  /**
+   * Fetch OHLCV (klines) history for a specific symbol
+   * Endpoint: GET /fapi/v1/klines
+   *
+   * API Documentation:
+   * - Max limit: 1500 records per request
+   * - If startTime and endTime are omitted, returns most recent klines
+   * - Interval: 1h for 1-hour candles
+   *
+   * Rate Limits:
+   * - Weight: 5 per request
+   * - Rate limit: 2400 requests per minute
+   */
+  async getOHLCV(symbol: string, interval: string = '1h'): Promise<FetchedOHLCVData[]> {
+    try {
+      logger.debug(`Fetching OHLCV history for ${symbol} from Binance`);
+
+      // Calculate time range: 480 hours ago to match funding rate depth
+      const hoursAgo = 480;
+      const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
+      const endTime = Date.now();
+
+      const response = await this.client.get<BinanceKline[]>('/fapi/v1/klines', {
+        params: {
+          symbol,
+          interval,
+          startTime,
+          endTime,
+          limit: 1500, // Max allowed by Binance
+        },
+      });
+
+      const klines = response.data;
+      if (!klines || !Array.isArray(klines)) {
+        logger.warn(`No OHLCV data found for ${symbol}`);
+        return [];
+      }
+
+      const results: FetchedOHLCVData[] = klines.map((kline) => ({
+        asset: symbol,
+        timestamp: new Date(kline[0]),
+        open: kline[1],
+        high: kline[2],
+        low: kline[3],
+        close: kline[4],
+        volume: kline[5],
+        quoteVolume: kline[7],
+        tradesCount: kline[8],
+      }));
+
+      logger.debug(`Fetched ${results.length} OHLCV records for ${symbol}`);
+      return results;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch OHLCV for ${symbol}: ${errorMsg}`);
+      throw new Error(`Failed to fetch OHLCV for ${symbol}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch OHLCV history for multiple symbols with rate limiting
+   *
+   * Binance Rate Limits:
+   * - /fapi/v1/klines endpoint: Weight 5, 2400 requests per minute
+   * - Much higher limit than funding rate endpoint
+   *
+   * Default Strategy:
+   * - 600ms delay = 100 requests/min for safety
+   */
+  async getOHLCVBatch(
+    symbols: string[],
+    interval: string = '1h',
+    delayMs: number = 600,
+    concurrency: number = 1,
+    onProgress?: (currentSymbol: string, processed: number) => void
+  ): Promise<Map<string, FetchedOHLCVData[]>> {
+    const results = new Map<string, FetchedOHLCVData[]>();
+
+    logger.info(`Fetching OHLCV data for ${symbols.length} assets from Binance Futures`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      symbols,
+      async (symbol) => {
+        try {
+          logger.info(`[API] Fetching OHLCV ${symbol} from Binance...`);
+          const data = await this.getOHLCV(symbol, interval);
+          results.set(symbol, data);
+          logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
+          results.set(symbol, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(symbol, processed);
+          }
+        }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
+
+    const totalRecords = Array.from(results.values()).reduce(
+      (sum, data) => sum + data.length,
+      0
+    );
+    logger.info(`Fetched total of ${totalRecords} OHLCV records from Binance Futures`);
 
     return results;
   }

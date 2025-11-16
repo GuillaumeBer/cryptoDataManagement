@@ -4,6 +4,7 @@ import dataFetcherManager from '../services/dataFetcherManager';
 import { getSchedulerStatus } from '../services/scheduler';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
+import OHLCVRepository from '../models/OHLCVRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
 import UnifiedAssetRepository from '../models/UnifiedAssetRepository';
 import assetMappingService from '../services/assetMappingService';
@@ -306,6 +307,127 @@ router.get('/funding-rates', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch funding rates',
+      error: `${error}`,
+    });
+  }
+});
+
+const MAX_OHLCV_LIMIT = 10000;
+
+const ohlcvQuerySchema = z
+  .object({
+    asset: z.string().trim().min(1, { message: 'asset cannot be empty' }).optional(),
+    platform: z.string().trim().min(1, { message: 'platform cannot be empty' }).optional(),
+    timeframe: z
+      .string()
+      .trim()
+      .min(1, { message: 'timeframe cannot be empty' })
+      .optional(),
+    startDate: dateStringSchema.optional(),
+    endDate: dateStringSchema.optional(),
+    limit: z
+      .preprocess(value => {
+        if (typeof value === 'string' && value.trim() !== '') {
+          const parsed = Number(value);
+          return Number.isNaN(parsed) ? value : parsed;
+        }
+        return value;
+      }, z.number().int().min(1).max(MAX_OHLCV_LIMIT))
+      .optional()
+      .default(1000),
+    offset: z
+      .preprocess(value => {
+        if (typeof value === 'string' && value.trim() !== '') {
+          const parsed = Number(value);
+          return Number.isNaN(parsed) ? value : parsed;
+        }
+        return value;
+      }, z.number().int().min(0))
+      .optional()
+      .default(0),
+  })
+  .superRefine((data, ctx) => {
+    if (data.startDate && data.endDate && data.startDate > data.endDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'startDate must be before or equal to endDate',
+        path: ['startDate'],
+      });
+    }
+  });
+
+/**
+ * GET /api/ohlcv
+ * Get OHLCV data with filters
+ * Query params: asset, startDate, endDate, platform, timeframe, limit, offset
+ */
+router.get('/ohlcv', async (req: Request, res: Response) => {
+  try {
+    const parseResult = ohlcvQuerySchema.safeParse(req.query);
+
+    if (!parseResult.success) {
+      const { fieldErrors, formErrors } = parseResult.error.flatten();
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid query parameters for OHLCV data',
+        errors: {
+          ...fieldErrors,
+          ...(formErrors.length ? { _errors: formErrors } : {}),
+        },
+      });
+    }
+
+    const { asset, startDate, endDate, platform, timeframe, limit, offset } = parseResult.data;
+
+    logger.info('[API] OHLCV request', {
+      asset,
+      startDate,
+      endDate,
+      platform,
+      timeframe,
+      limit,
+      offset,
+    });
+
+    const query: any = {
+      limit,
+      offset,
+    };
+
+    if (asset) query.asset = asset;
+    if (platform) query.platform = platform;
+    if (timeframe) query.timeframe = timeframe;
+    if (startDate) query.startDate = startDate;
+    if (endDate) query.endDate = endDate;
+
+    logger.debug('[API] Querying OHLCV with', query);
+    const ohlcvData = await OHLCVRepository.find(query);
+    logger.info('[API] OHLCV query completed', {
+      asset,
+      platform: query.platform || 'all',
+      timeframe: query.timeframe || 'all',
+      results: ohlcvData.length,
+    });
+
+    res.json({
+      success: true,
+      data: ohlcvData,
+      count: ohlcvData.length,
+      query: {
+        asset: query.asset || 'all',
+        platform: query.platform || 'all',
+        timeframe: query.timeframe || 'all',
+        startDate: query.startDate,
+        endDate: query.endDate,
+        limit: query.limit,
+        offset: query.offset,
+      },
+    });
+  } catch (error) {
+    logger.error('OHLCV endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch OHLCV data',
       error: `${error}`,
     });
   }

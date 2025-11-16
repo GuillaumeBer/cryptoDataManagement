@@ -63,6 +63,51 @@ export interface FundingRateWithAsset extends FundingRate {
   asset_name: string | null;
 }
 
+export interface OHLCVData {
+  id: number;
+  asset_id: number;
+  timestamp: Date;
+  timeframe: string; // '1m', '5m', '15m', '1h', '4h', '1d', etc.
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string | null;
+  quote_volume: string | null;
+  trades_count: number | null;
+  platform: string;
+  fetched_at: Date;
+}
+
+export interface CreateOHLCVParams {
+  asset_id: number;
+  timestamp: Date;
+  timeframe: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume?: string;
+  quote_volume?: string;
+  trades_count?: number;
+  platform: string;
+}
+
+export interface OHLCVQuery {
+  asset?: string;
+  startDate?: Date;
+  endDate?: Date;
+  platform?: string;
+  timeframe?: string; // Filter by timeframe ('1m', '1h', '1d', etc.)
+  limit?: number;
+  offset?: number;
+}
+
+export interface OHLCVDataWithAsset extends OHLCVData {
+  asset_symbol: string;
+  asset_name: string | null;
+}
+
 export interface AssetAnalytics {
   symbol: string;
   platform: string;
