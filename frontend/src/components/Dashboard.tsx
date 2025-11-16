@@ -5,6 +5,7 @@ import FundingRateChart from './FundingRateChart';
 import Analytics from './Analytics';
 import DataFetcher from './DataFetcher';
 import StatusBar from './StatusBar';
+import SchedulerWidget from './SchedulerWidget';
 import { PLATFORMS, type Platform } from '../constants/platforms';
 
 export default function Dashboard() {
@@ -46,6 +47,7 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <SchedulerWidget scheduler={status?.scheduler} recentErrors={status?.recentErrors} />
         {/* Platform Tabs */}
         <div className="mb-8 bg-white rounded-lg shadow">
           <div className="border-b border-gray-200">

@@ -44,6 +44,33 @@ export interface FetchInProgressState {
   currentProgress?: ProgressEvent;
 }
 
+export interface SchedulerPlatformResult {
+  platform: string;
+  status: 'success' | 'partial' | 'failed';
+  startedAt: string;
+  completedAt: string;
+  durationMs: number;
+  assetsProcessed?: number;
+  recordsFetched?: number;
+  error?: string;
+}
+
+export interface SchedulerRunSummary {
+  state: 'success' | 'partial' | 'failed' | 'idle' | 'running';
+  startedAt?: string;
+  completedAt?: string;
+  durationMs?: number;
+  results: SchedulerPlatformResult[];
+  error?: string;
+}
+
+export interface SchedulerStatus {
+  cronExpression: string;
+  isScheduled: boolean;
+  isJobRunning: boolean;
+  lastRun: SchedulerRunSummary | null;
+}
+
 export interface SystemStatus {
   platform: string;
   assetCount: number;
@@ -55,6 +82,8 @@ export interface SystemStatus {
     assetsProcessed: number;
   } | null;
   fetchInProgress?: FetchInProgressState;
+  scheduler?: SchedulerStatus;
+  recentErrors?: FetchLog[];
 }
 
 export interface FetchResult {
