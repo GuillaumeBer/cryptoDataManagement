@@ -59,6 +59,32 @@ export class FetchLogRepository {
   }
 
   /**
+   * Get recent failed or partial fetch logs (optionally filtered by platform)
+   */
+  async getRecentErrors(platform?: string, limit: number = 5): Promise<FetchLog[]> {
+    const params: Array<string | number> = [];
+    let whereClause = "WHERE (status = 'failed' OR status = 'partial' OR error_message IS NOT NULL)";
+
+    if (platform) {
+      params.push(platform);
+      whereClause += ` AND platform = $${params.length}`;
+    }
+
+    params.push(limit);
+    const limitPosition = params.length;
+
+    const result = await query<FetchLog>(
+      `SELECT * FROM fetch_logs
+       ${whereClause}
+       ORDER BY started_at DESC
+       LIMIT $${limitPosition}`,
+      params
+    );
+
+    return result.rows;
+  }
+
+  /**
    * Get last successful fetch for a platform
    */
   async getLastSuccessful(platform: string): Promise<FetchLog | null> {

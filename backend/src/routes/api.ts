@@ -118,14 +118,18 @@ router.get('/status', async (req: Request, res: Response) => {
   try {
     const platform = (req.query.platform as string) || 'hyperliquid';
     const fetcher = dataFetcherManager.getFetcher(platform);
-    const status = await fetcher.getStatus();
-    const schedulerStatus = getSchedulerStatus();
+    const [status, schedulerStatus, recentErrors] = await Promise.all([
+      fetcher.getStatus(),
+      Promise.resolve(getSchedulerStatus()),
+      FetchLogRepository.getRecentErrors(platform, 5),
+    ]);
 
     res.json({
       success: true,
       data: {
         ...status,
         scheduler: schedulerStatus,
+        recentErrors,
       },
     });
   } catch (error) {
