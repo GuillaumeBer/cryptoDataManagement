@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import { runPromisePool } from '../../utils/promisePool';
 import {
-  BinanceSymbol,
+  BinanceAsset,
   BinanceExchangeInfo,
   BinanceFundingRate,
   FetchedFundingData,
@@ -43,7 +43,7 @@ export class BinanceClient {
    * Fetch all available perpetual futures from Binance
    * Endpoint: GET /fapi/v1/exchangeInfo
    */
-  async getAssets(): Promise<BinanceSymbol[]> {
+  async getAssets(): Promise<BinanceAsset[]> {
     try {
       logger.info('Fetching assets from Binance Futures');
 

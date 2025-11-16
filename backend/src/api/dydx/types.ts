@@ -1,7 +1,7 @@
 // DyDx V4 Indexer API types
 // Documentation: https://docs.dydx.exchange/api_integration-indexer/indexer_api
 
-export interface DyDxMarket {
+export interface DyDxAsset {
   ticker: string; // e.g., "BTC-USD"
   status: string; // "ACTIVE", "PAUSED", etc.
   baseAsset: string; // e.g., "BTC"
@@ -27,7 +27,7 @@ export interface DyDxMarket {
 
 export interface DyDxMarketsResponse {
   markets: {
-    [ticker: string]: DyDxMarket;
+    [ticker: string]: DyDxAsset;
   };
 }
 
