@@ -15,7 +15,6 @@ const STREAMING_STATUSES = new Set(['connecting', 'connected', 'reconnecting']);
 export default function DataFetcher({ platform, selectedAsset }: DataFetcherProps) {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
-  const [resampling, setResampling] = useState(false);
   const [fetchType, setFetchType] = useState<'initial' | 'incremental'>('initial');
 
   const { progress, status: streamStatus, error: streamError, currentType, start, stop, hydrateProgress } =
@@ -46,23 +45,6 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
     return Promise.all(invalidations);
   }, [platform, queryClient, selectedAsset]);
 
-  const performResample = useCallback(async () => {
-    setResampling(true);
-    try {
-      const response = await apiClient.resampleHyperliquid();
-      if (!response.success) {
-        throw new Error(response.message || 'Resampling failed');
-      }
-      hydrateProgress((prev) => (prev ? { ...prev, type: 'complete' } : prev));
-      addToast('Resampling complete', 'success');
-      await invalidateQueries();
-    } catch (error) {
-      addToast(error instanceof Error ? error.message : 'Resampling failed', 'error');
-    } finally {
-      setResampling(false);
-    }
-  }, [addToast, hydrateProgress, invalidateQueries]);
-
   useEffect(() => {
     if (!progress) {
       lastTerminalEventRef.current = null;
@@ -70,14 +52,15 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
     }
 
     if (progress.type === 'complete') {
-      const key = `complete-${progress.recordsFetched}-${progress.processedAssets}`;
+      const resampleKey = `${progress.resampleRecordsCreated ?? 0}-${progress.resampleAssetsProcessed ?? 0}`;
+      const key = `complete-${progress.phase}-${progress.recordsFetched}-${progress.processedAssets}-${resampleKey}`;
       if (lastTerminalEventRef.current === key) return;
       lastTerminalEventRef.current = key;
-      addToast('Data fetch completed', 'success');
+      addToast(
+        progress.phase === 'resample' ? 'Data fetch & resampling completed' : 'Data fetch completed',
+        'success'
+      );
       invalidateQueries();
-      if (platform === 'hyperliquid') {
-        performResample();
-      }
     } else if (progress.type === 'error') {
       const key = `error-${progress.errors.join('-')}`;
       if (lastTerminalEventRef.current === key) return;
@@ -85,7 +68,7 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
       addToast(progress.errors[0] ?? 'Fetch failed', 'error');
       invalidateQueries();
     }
-  }, [progress, addToast, invalidateQueries, performResample, platform]);
+  }, [progress, addToast, invalidateQueries]);
 
   useEffect(() => {
     if (!streamError) {
@@ -100,7 +83,6 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
 
   useEffect(() => {
     stop();
-    setResampling(false);
     setFetchType('initial');
     hydrateProgress(null);
 
@@ -142,7 +124,7 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
     }
   };
 
-  const renderProgress = (current: ProgressEvent | null, fetching: boolean, isResampling: boolean) => {
+  const renderProgress = (current: ProgressEvent | null, fetching: boolean) => {
     if (!current && !fetching && !streamError) return null;
 
     if (fetching && !current) {
@@ -172,17 +154,28 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
       );
     }
 
+    if (current?.phase === 'resample' && current.type !== 'error' && current.type !== 'complete') {
+      return (
+        <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded">
+          <p className="text-sm text-purple-800">{current.message ?? 'Generating 8-hour aggregated data...'}</p>
+          <p className="text-xs text-purple-600 mt-1">This may take a few moments.</p>
+        </div>
+      );
+    }
+
     if (current?.type === 'complete') {
       return (
         <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded">
           <p className="text-sm text-green-800">
-            ✓ Completed! Fetched {current.recordsFetched} records from {current.processedAssets} assets
+            {current.phase === 'resample'
+              ? `✓ Completed! ${current.resampleRecordsCreated ?? 0} aggregated records generated across ${current.resampleAssetsProcessed ?? 0} assets`
+              : `✓ Completed! Fetched ${current.recordsFetched} records from ${current.processedAssets} assets`}
           </p>
           {current.errors.length > 0 && (
             <p className="text-xs text-orange-600 mt-1">{current.errors.length} errors occurred</p>
           )}
-          {isResampling && platform === 'hyperliquid' && (
-            <p className="text-xs text-purple-600 mt-1">Generating 8-hour aggregated data...</p>
+          {current.phase === 'resample' && (
+            <p className="text-xs text-gray-600 mt-1">Hyperliquid data is ready for 8-hour comparisons.</p>
           )}
         </div>
       );
@@ -215,9 +208,6 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
     if (isFetching) {
       return activeFetchType === 'initial' ? 'Fetching all data...' : 'Updating data...';
     }
-    if (resampling) {
-      return 'Resampling...';
-    }
     return 'Fetch Data';
   };
 
@@ -237,13 +227,13 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
         <p className="text-sm text-gray-600 mb-4">{getDescription()}</p>
         <button
           onClick={handleFetch}
-          disabled={isFetching || resampling}
+          disabled={isFetching}
           className="w-full bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
         >
           {getButtonText()}
         </button>
 
-        {renderProgress(progress, isFetching, resampling)}
+        {renderProgress(progress, isFetching)}
       </div>
     </div>
   );

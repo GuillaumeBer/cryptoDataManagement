@@ -49,11 +49,6 @@ class ApiClient {
     return response.data.data!;
   }
 
-  async resampleHyperliquid(): Promise<{ success: boolean; message?: string }> {
-    const response = await this.client.post('/resample/hyperliquid-8h');
-    return response.data;
-  }
-
   // Asset endpoints
   async getAssets(platform?: string): Promise<Asset[]> {
     const params = platform ? { platform } : {};
