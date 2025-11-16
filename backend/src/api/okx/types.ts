@@ -1,7 +1,7 @@
 // OKX V5 API types
 // Documentation: https://www.okx.com/docs-v5/en/
 
-export interface OKXInstrument {
+export interface OKXAsset {
   instType: string; // "SWAP"
   instId: string; // e.g., "BTC-USDT-SWAP"
   uly: string; // Underlying, e.g., "BTC-USDT"
@@ -26,7 +26,7 @@ export interface OKXInstrument {
 export interface OKXInstrumentsResponse {
   code: string; // "0" for success
   msg: string; // "" for success, error message otherwise
-  data: OKXInstrument[];
+  data: OKXAsset[];
 }
 
 export interface OKXFundingRate {

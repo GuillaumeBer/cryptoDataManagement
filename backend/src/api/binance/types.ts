@@ -1,6 +1,6 @@
 // Binance Futures API types
 
-export interface BinanceSymbol {
+export interface BinanceAsset {
   symbol: string;
   pair: string;
   contractType: string;
@@ -10,7 +10,7 @@ export interface BinanceSymbol {
 }
 
 export interface BinanceExchangeInfo {
-  symbols: BinanceSymbol[];
+  symbols: BinanceAsset[];
 }
 
 export interface BinanceFundingRate {

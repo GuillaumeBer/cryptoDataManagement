@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import { runPromisePool } from '../../utils/promisePool';
 import {
-  OKXInstrument,
+  OKXAsset,
   OKXInstrumentsResponse,
   OKXFundingRateHistoryResponse,
   FetchedFundingData,
@@ -67,7 +67,7 @@ export class OKXClient {
    *
    * Rate Limit: 20 requests per 2 seconds
    */
-  async getAssets(): Promise<OKXInstrument[]> {
+  async getAssets(): Promise<OKXAsset[]> {
     try {
       logger.info('Fetching perpetual swaps from OKX');
 

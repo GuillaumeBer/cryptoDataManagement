@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import { runPromisePool } from '../../utils/promisePool';
 import {
-  BybitInstrument,
+  BybitAsset,
   BybitInstrumentsResponse,
   BybitFundingRateHistoryResponse,
   FetchedFundingData,
@@ -69,7 +69,7 @@ export class BybitClient {
    *
    * Rate Limit: 50 requests per 2 seconds
    */
-  async getAssets(): Promise<BybitInstrument[]> {
+  async getAssets(): Promise<BybitAsset[]> {
     try {
       logger.info('Fetching perpetual contracts from Bybit');
 

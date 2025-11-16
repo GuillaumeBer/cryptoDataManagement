@@ -1,7 +1,7 @@
 // Bybit V5 API types
 // Documentation: https://bybit-exchange.github.io/docs/v5/intro
 
-export interface BybitInstrument {
+export interface BybitAsset {
   symbol: string; // e.g., "BTCUSDT"
   contractType: string; // "LinearPerpetual"
   status: string; // "Trading", "Closed", etc.
@@ -36,7 +36,7 @@ export interface BybitInstrumentsResponse {
   retMsg: string; // "OK" for success
   result: {
     category: string; // "linear"
-    list: BybitInstrument[];
+    list: BybitAsset[];
     nextPageCursor: string;
   };
   retExtInfo: {};

@@ -9,10 +9,31 @@ import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
 import { CreateFundingRateParams } from '../models/types';
+import {
+  normalizePlatformAsset,
+  SupportedPlatform,
+  PlatformAssetPayload,
+  isSupportedPlatform,
+} from './normalizers/platformAssetNormalizer';
 import { logger } from '../utils/logger';
 
+interface FundingHistoryRecord {
+  asset: string;
+  timestamp: Date;
+  fundingRate: string;
+  premium: string;
+}
+
 // Union type for all platform clients
-type PlatformClient = HyperliquidClient | AsterClient | BinanceClient | BybitClient | OKXClient | DyDxClient;
+type PlatformClient = {
+  getAssets(): Promise<PlatformAssetPayload[]>;
+  getFundingHistoryBatch(
+    symbols: string[],
+    delayMs?: number,
+    concurrency?: number,
+    onProgress?: (currentSymbol: string, processed: number) => void
+  ): Promise<Map<string, FundingHistoryRecord[]>>;
+};
 
 export interface ProgressEvent {
   type: 'start' | 'progress' | 'complete' | 'error';
@@ -26,7 +47,7 @@ export interface ProgressEvent {
 
 export class DataFetcherService extends EventEmitter {
   private platformClient: PlatformClient;
-  private platform: string;
+  private platform: SupportedPlatform;
   private isInitialFetchInProgress = false;
   private isIncrementalFetchInProgress = false;
   private currentProgress: ProgressEvent | null = null;
@@ -121,7 +142,14 @@ export class DataFetcherService extends EventEmitter {
 
   constructor(platform: string = 'hyperliquid') {
     super();
-    this.platform = platform.toLowerCase();
+    const normalizedPlatform = platform.toLowerCase();
+
+    if (isSupportedPlatform(normalizedPlatform)) {
+      this.platform = normalizedPlatform;
+    } else {
+      logger.warn(`Unsupported platform: ${platform}, defaulting to Hyperliquid`);
+      this.platform = 'hyperliquid';
+    }
 
     // Initialize the correct client based on platform
     switch (this.platform) {
@@ -144,8 +172,7 @@ export class DataFetcherService extends EventEmitter {
         this.platformClient = new AsterClient();
         break;
       default:
-        logger.warn(`Unsupported platform: ${platform}, defaulting to Hyperliquid`);
-        this.platform = 'hyperliquid';
+        // TypeScript should never reach this branch, but keep as safeguard
         this.platformClient = new HyperliquidClient();
     }
 
@@ -196,36 +223,9 @@ export class DataFetcherService extends EventEmitter {
       const assets = await this.platformClient.getAssets();
 
       // Normalize asset data across platforms
-      const normalizedAssets = assets.flatMap((a: any) => {
-        // Prefer the machine-readable trading symbol for API calls
-        const rawSymbol =
-          a.symbol ??
-          a.instId ??
-          a.ticker ??
-          a.indexTokenSymbol ??
-          a.baseAsset ??
-          a.product_id ??
-          a.name ??
-          '';
-        const symbol = typeof rawSymbol === 'string' ? rawSymbol.trim() : '';
-
-        if (!symbol) {
-          logger.warn(`Skipping asset without symbol for ${this.platform}`, { asset: a });
-          return [];
-        }
-
-        const displayName =
-          (typeof a.name === 'string' && a.name.trim()) ||
-          (typeof a.baseAsset === 'string' && a.baseAsset.trim()) ||
-          symbol;
-
-        return [
-          {
-            symbol,
-            platform: this.platform,
-            name: displayName,
-          },
-        ];
+      const normalizedAssets = assets.flatMap((asset: PlatformAssetPayload) => {
+        const normalized = normalizePlatformAsset(this.platform, asset);
+        return normalized ? [normalized] : [];
       });
 
       // Deduplicate assets by symbol to avoid "ON CONFLICT DO UPDATE cannot affect row a second time" error

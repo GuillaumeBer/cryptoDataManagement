@@ -2,7 +2,7 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import { runPromisePool } from '../../utils/promisePool';
 import {
-  DyDxMarket,
+  DyDxAsset,
   DyDxMarketsResponse,
   DyDxHistoricalFundingResponse,
   FetchedFundingData,
@@ -63,7 +63,7 @@ export class DyDxClient {
    *
    * Returns: Object with market ticker as key and market data as value
    */
-  async getAssets(): Promise<DyDxMarket[]> {
+  async getAssets(): Promise<DyDxAsset[]> {
     try {
       logger.info('Fetching perpetual markets from DyDx V4');
 
