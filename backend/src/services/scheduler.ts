@@ -70,7 +70,7 @@ function updateLastRun(summary: SchedulerRunSummary): void {
   lastRunSummary = summary;
 }
 
-async function runScheduledFetch(): Promise<void> {
+export async function runScheduledFetch(): Promise<void> {
   if (isJobRunning) {
     logger.warn('Scheduled incremental fetch is already running, skipping this tick');
     return;

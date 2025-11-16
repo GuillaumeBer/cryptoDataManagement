@@ -86,7 +86,7 @@ export class AssetMappingRepository {
 
     const values = mappings
       .map(
-        (m, idx) =>
+        (_, idx) =>
           `($${idx * 5 + 1}, $${idx * 5 + 2}, $${idx * 5 + 3}, $${idx * 5 + 4}, $${idx * 5 + 5})`
       )
       .join(', ');

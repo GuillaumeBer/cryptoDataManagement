@@ -194,6 +194,14 @@ npm start
 
 The backend API will be available at `http://localhost:3000`
 
+#### Run Backend Tests
+```bash
+cd backend
+npm run test:backend
+```
+
+The test suite spins up an in-memory PostgreSQL instance (via `pg-mem`) so no external database is required.
+
 ### 3. Frontend Setup
 
 #### Install Dependencies
