@@ -10,9 +10,9 @@ interface StatusBarProps {
 export default function StatusBar({ status, isLoading, error }: StatusBarProps) {
   if (isLoading) {
     return (
-      <div className="bg-gray-100 border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-          <p className="text-sm text-gray-500">Loading status...</p>
+      <div className="bg-gray-50 border-t border-gray-200">
+        <div className="px-4 py-3">
+          <p className="text-sm text-gray-500">Loading platform status...</p>
         </div>
       </div>
     );
@@ -20,9 +20,9 @@ export default function StatusBar({ status, isLoading, error }: StatusBarProps) 
 
   if (error) {
     return (
-      <div className="bg-red-50 border-b border-red-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-          <p className="text-sm text-red-700">Failed to load status.</p>
+      <div className="bg-red-50 border-t border-red-200">
+        <div className="px-4 py-3">
+          <p className="text-sm text-red-700">Failed to load platform status.</p>
         </div>
       </div>
     );
@@ -33,8 +33,8 @@ export default function StatusBar({ status, isLoading, error }: StatusBarProps) 
   }
 
   return (
-    <div className="bg-blue-50 border-b border-blue-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+    <div className="bg-blue-50 border-t border-blue-200">
+      <div className="px-4 py-3">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <p className="text-xs text-blue-600 font-medium">Platform</p>
