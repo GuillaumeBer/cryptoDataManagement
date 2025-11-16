@@ -5,11 +5,27 @@ let pool: Pool | null = null;
 
 export function getPool(): Pool {
   if (!pool) {
-    console.log('DEBUG: DATABASE_URL =', process.env.DATABASE_URL);
-    console.log('DEBUG: DATABASE_URL type =', typeof process.env.DATABASE_URL);
+    const connectionString = process.env.DATABASE_URL;
+
+    if (!connectionString) {
+      throw new Error('DATABASE_URL is not defined');
+    }
+
+    try {
+      const url = new URL(connectionString);
+      logger.debug('Connecting to database', {
+        host: url.hostname,
+        port: url.port,
+        database: url.pathname.replace('/', ''),
+        sslmode: url.searchParams.get('sslmode') || undefined,
+      });
+    } catch (error) {
+      logger.debug('Connecting to database with provided connection string');
+      logger.warn('Failed to parse DATABASE_URL for logging', error);
+    }
 
     pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString,
       max: parseInt(process.env.DATABASE_POOL_SIZE || '10'),
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
