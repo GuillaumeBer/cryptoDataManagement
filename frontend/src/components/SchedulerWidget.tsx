@@ -163,7 +163,7 @@ export default function SchedulerWidget({ scheduler, recentErrors }: SchedulerWi
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-semibold text-gray-900">Recent Errors</h3>
-            <p className="text-sm text-gray-500">Latest fetch issues for this platform</p>
+            <p className="text-sm text-gray-500">Latest fetch issues across all platforms</p>
           </div>
           <span className="text-xs text-gray-500">{recentErrors?.length || 0} items</span>
         </div>
@@ -191,7 +191,7 @@ export default function SchedulerWidget({ scheduler, recentErrors }: SchedulerWi
             ))}
           </ul>
         ) : (
-          <p className="mt-4 text-sm text-gray-500">No recent errors for this platform.</p>
+          <p className="mt-4 text-sm text-gray-500">No recent errors across all platforms.</p>
         )}
       </div>
     </div>

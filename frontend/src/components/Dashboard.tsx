@@ -30,6 +30,9 @@ export default function Dashboard() {
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('hyperliquid');
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
   const {
+    data: globalStatus,
+  } = useSystemStatus();
+  const {
     data: status,
     isLoading: isStatusLoading,
     error: statusError,
@@ -152,7 +155,7 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="space-y-6">
-            <SchedulerWidget scheduler={status?.scheduler} recentErrors={status?.recentErrors} />
+            <SchedulerWidget scheduler={globalStatus?.scheduler} recentErrors={globalStatus?.recentErrors} />
             <AssetCoverageView
               assets={allAssets}
               isLoading={isAllAssetsLoading}
@@ -209,6 +212,10 @@ export default function Dashboard() {
           {/* Platform Content */}
           <div className="mt-6 space-y-6">
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+              <DataFetcher platform={selectedPlatform} selectedAsset={selectedAsset} />
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
               <AssetSelector
                 assets={platformAssets || []}
                 isLoading={isAssetsLoading}
@@ -216,10 +223,6 @@ export default function Dashboard() {
                 selectedAsset={selectedAsset}
                 onSelectAsset={setSelectedAsset}
               />
-            </div>
-
-            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-              <DataFetcher platform={selectedPlatform} selectedAsset={selectedAsset} />
             </div>
 
             {selectedAsset ? (
@@ -248,7 +251,7 @@ export default function Dashboard() {
                 </svg>
                 <h3 className="mt-3 text-base font-medium text-gray-900">Select an asset to explore</h3>
                 <p className="mt-1 text-sm text-gray-500">
-                  Choose an asset from the selector above to view analytics and funding rate charts. The asset coverage widget
+                  Choose an asset from the asset selector to view analytics and funding rate charts. The asset coverage widget
                   in the Global Overview tab shows what is available across every venue.
                 </p>
               </div>
