@@ -75,22 +75,19 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* Status Bar */}
-      <StatusBar status={status} isLoading={isStatusLoading} error={statusError} />
-
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-12">
         {/* Global overview */}
         <section>
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="h-1 w-12 bg-gradient-to-r from-blue-500 to-blue-300 rounded-full"></div>
               <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Global overview</p>
-              <h2 className="text-2xl font-semibold text-gray-900 mt-1">Scheduling & coverage</h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Everything in this row is platform-agnostic. Use it to audit ingestion health and to view assets across
-                all venues.
-              </p>
             </div>
+            <h2 className="text-2xl font-semibold text-gray-900">Scheduling & cross-platform coverage</h2>
+            <p className="text-sm text-gray-500 mt-2 max-w-3xl">
+              Monitor automated data ingestion health and view asset availability across all platforms. This section provides a bird's-eye view of your entire data pipeline, independent of any specific venue.
+            </p>
           </div>
           <div className="mt-6 grid gap-6 lg:grid-cols-3">
             <div className="lg:col-span-1">
@@ -108,18 +105,15 @@ export default function Dashboard() {
 
         {/* Platform workspace */}
         <section>
-          <div className="flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">Platform workspace</p>
-              <h2 className="text-2xl font-semibold text-gray-900 mt-1">Venue-specific exploration</h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Choose a venue to run fetches, browse its instruments and dive deep into funding analytics.
-              </p>
+          <div className="mb-6">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="h-1 w-12 bg-gradient-to-r from-purple-500 to-purple-300 rounded-full"></div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-purple-600">Platform workspace</p>
             </div>
-            <div className="bg-white rounded-xl border border-gray-100 px-4 py-3 text-right">
-              <p className="text-xs uppercase tracking-wide text-gray-500">Currently viewing</p>
-              <p className="text-base font-semibold text-gray-900 capitalize">{selectedPlatform}</p>
-            </div>
+            <h2 className="text-2xl font-semibold text-gray-900">Venue-specific exploration</h2>
+            <p className="text-sm text-gray-500 mt-2 max-w-3xl">
+              Select a platform to trigger data fetches, browse available instruments, and analyze funding rate trends. All elements in this section are specific to your currently selected venue.
+            </p>
           </div>
 
           {/* Platform Tabs */}
@@ -146,7 +140,15 @@ export default function Dashboard() {
               ))}
             </nav>
 
-            <div className="mt-6 grid gap-6 lg:grid-cols-5">
+            {/* Platform Status Bar */}
+            <div className="mt-4 -mx-4 -mb-4">
+              <StatusBar status={status} isLoading={isStatusLoading} error={statusError} />
+            </div>
+          </div>
+
+          {/* Platform Content */}
+          <div className="mt-6 bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+            <div className="grid gap-6 lg:grid-cols-5">
               <div className="lg:col-span-2 space-y-6">
                 <AssetSelector
                   assets={platformAssets || []}
