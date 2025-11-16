@@ -30,6 +30,9 @@ export default function Dashboard() {
   const [selectedPlatform, setSelectedPlatform] = useState<Platform>('hyperliquid');
   const [selectedAsset, setSelectedAsset] = useState<string | null>(null);
   const {
+    data: globalStatus,
+  } = useSystemStatus();
+  const {
     data: status,
     isLoading: isStatusLoading,
     error: statusError,
@@ -152,7 +155,7 @@ export default function Dashboard() {
             </p>
           </div>
           <div className="space-y-6">
-            <SchedulerWidget scheduler={status?.scheduler} recentErrors={status?.recentErrors} />
+            <SchedulerWidget scheduler={globalStatus?.scheduler} recentErrors={globalStatus?.recentErrors} />
             <AssetCoverageView
               assets={allAssets}
               isLoading={isAllAssetsLoading}
