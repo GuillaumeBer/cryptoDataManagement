@@ -33,11 +33,11 @@ async function testOKXFunding() {
 if (require.main === module) {
   testOKXFunding()
     .then(() => {
-      console.log('✓ Test completed');
+      logger.info('✓ Test completed');
       process.exit(0);
     })
     .catch((error) => {
-      console.error('✗ Test failed:', error);
+      logger.error('✗ Test failed:', error);
       process.exit(1);
     });
 }

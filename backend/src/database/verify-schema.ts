@@ -24,9 +24,13 @@ async function verifySchema() {
       ORDER BY column_name;
     `);
 
-    console.log('\n=== Assets Table Column Info ===');
+    logger.info('Assets table column info');
     result.rows.forEach((row) => {
-      console.log(`${row.column_name}: ${row.data_type}(${row.character_maximum_length})`);
+      logger.info('Column definition', {
+        column_name: row.column_name,
+        data_type: row.data_type,
+        character_maximum_length: row.character_maximum_length,
+      });
     });
 
     // Check applied migrations
@@ -36,12 +40,13 @@ async function verifySchema() {
       ORDER BY applied_at;
     `);
 
-    console.log('\n=== Applied Migrations ===');
+    logger.info('Applied migrations');
     migrations.rows.forEach((row) => {
-      console.log(`${row.migration_name} - ${row.applied_at}`);
+      logger.info('Migration entry', {
+        migration_name: row.migration_name,
+        applied_at: row.applied_at,
+      });
     });
-
-    console.log('\n');
     logger.info('Schema verification completed');
   } catch (error) {
     logger.error('Schema verification failed', error);
@@ -58,7 +63,7 @@ if (require.main === module) {
       process.exit(0);
     })
     .catch((error) => {
-      console.error('✗ Verification failed:', error);
+      logger.error('✗ Verification failed:', error);
       process.exit(1);
     });
 }

@@ -5,8 +5,10 @@ let pool: Pool | null = null;
 
 export function getPool(): Pool {
   if (!pool) {
-    console.log('DEBUG: DATABASE_URL =', process.env.DATABASE_URL);
-    console.log('DEBUG: DATABASE_URL type =', typeof process.env.DATABASE_URL);
+    logger.debug('Initializing database pool', {
+      hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
+      poolSize: parseInt(process.env.DATABASE_POOL_SIZE || '10', 10),
+    });
 
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,

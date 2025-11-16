@@ -174,7 +174,6 @@ export class DyDxClient {
       return allResults;
     } catch (error: any) {
       const errorMsg = this.getErrorMessage(error);
-      console.error(`Failed to fetch funding history for ${ticker}:`, errorMsg);
       logger.error(`Failed to fetch funding history for ${ticker}: ${errorMsg}`);
       throw new Error(`Failed to fetch funding history for ${ticker}: ${errorMsg}`);
     }
@@ -209,13 +208,13 @@ export class DyDxClient {
       tickers,
       async (ticker) => {
         try {
-          console.log(`[API] Fetching ${ticker} from DyDx V4...`);
+          logger.info(`[API] Fetching ${ticker} from DyDx V4...`);
           const data = await this.getFundingHistory(ticker);
           results.set(ticker, data);
-          console.log(`[API] ✓ ${ticker}: ${data.length} records`);
+          logger.info(`[API] ✓ ${ticker}: ${data.length} records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
-          console.log(`[API] ✗ ${ticker}: FAILED - ${errorMsg}`);
+          logger.error(`[API] ✗ ${ticker}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch funding history for ${ticker}`, errorMsg);
 
           // Store empty array for failed tickers to maintain consistency
