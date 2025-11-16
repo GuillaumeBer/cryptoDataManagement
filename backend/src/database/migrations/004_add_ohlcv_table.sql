@@ -26,7 +26,4 @@ CREATE INDEX IF NOT EXISTS idx_ohlcv_asset_time ON ohlcv_data(asset_id, timestam
 CREATE INDEX IF NOT EXISTS idx_ohlcv_timeframe ON ohlcv_data(timeframe);
 CREATE INDEX IF NOT EXISTS idx_ohlcv_platform_timeframe ON ohlcv_data(platform, timeframe);
 
--- Mark migration as complete
-INSERT INTO migrations (version, description)
-VALUES (4, 'Add OHLCV data table')
-ON CONFLICT (version) DO NOTHING;
+-- Migration tracking is handled automatically by the migration system
