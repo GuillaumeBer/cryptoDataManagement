@@ -55,7 +55,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="px-4 sm:px-6 lg:px-8 py-6">
           <h1 className="text-3xl font-bold text-gray-900">Crypto Data Management</h1>
           <p className="mt-2 text-sm text-gray-600 max-w-3xl">
             Operate a unified data plane for every derivatives venue. Funding rates are live today, while the layout
@@ -80,7 +80,7 @@ export default function Dashboard() {
 
       {/* Tab Navigation */}
       <div className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="px-4 sm:px-6 lg:px-8">
           <nav className="flex gap-8" aria-label="Main navigation">
             <button
               onClick={() => setActiveTab('global')}
@@ -137,7 +137,7 @@ export default function Dashboard() {
       </div>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-12">
+      <main className="px-4 sm:px-6 lg:px-8 py-10 space-y-12">
         {/* Global overview */}
         {activeTab === 'global' && (
         <section>
@@ -151,17 +151,13 @@ export default function Dashboard() {
               Monitor automated data ingestion health and view asset availability across all platforms. This section provides a bird's-eye view of your entire data pipeline, independent of any specific venue.
             </p>
           </div>
-          <div className="mt-6 grid gap-6 lg:grid-cols-3">
-            <div className="lg:col-span-1">
-              <SchedulerWidget scheduler={status?.scheduler} recentErrors={status?.recentErrors} />
-            </div>
-            <div className="lg:col-span-2">
-              <AssetCoverageView
-                assets={allAssets}
-                isLoading={isAllAssetsLoading}
-                error={allAssetsError}
-              />
-            </div>
+          <div className="space-y-6">
+            <SchedulerWidget scheduler={status?.scheduler} recentErrors={status?.recentErrors} />
+            <AssetCoverageView
+              assets={allAssets}
+              isLoading={isAllAssetsLoading}
+              error={allAssetsError}
+            />
           </div>
         </section>
         )}
