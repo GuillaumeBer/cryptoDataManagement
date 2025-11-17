@@ -237,6 +237,9 @@ export default function Dashboard() {
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                   <FundingRateChart asset={selectedAsset} platform={selectedPlatform} />
                 </div>
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                  <OHLCVChart asset={selectedAsset} platform={selectedPlatform} />
+                </div>
               </>
             ) : (
               <div className="text-center py-12 bg-white rounded-2xl shadow-sm border border-dashed border-gray-200">
