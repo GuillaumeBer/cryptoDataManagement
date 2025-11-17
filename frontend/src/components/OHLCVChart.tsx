@@ -1,15 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import {
+import type {
   CandlestickData,
   HistogramData,
   IChartApi,
   ISeriesApi,
   Time,
-  CrosshairMode,
-  CandlestickSeries,
-  HistogramSeries,
-  createChart,
+  CandlestickSeriesPartialOptions,
+  HistogramSeriesPartialOptions,
 } from 'lightweight-charts';
+import * as LightweightCharts from 'lightweight-charts';
 import { useOHLCV } from '../hooks/useApi';
 import type { OHLCVRecord } from '../types';
 import { formatDate } from '../utils/formatters';
@@ -65,7 +64,7 @@ export default function OHLCVChart({ asset, platform }: OHLCVChartProps) {
       return;
     }
 
-    const chart = createChart(chartContainerRef.current, {
+    const chart = LightweightCharts.createChart(chartContainerRef.current, {
       layout: {
         textColor: '#0f172a',
         background: { color: 'transparent' },
@@ -81,29 +80,60 @@ export default function OHLCVChart({ asset, platform }: OHLCVChartProps) {
         },
       },
       crosshair: {
-        mode: CrosshairMode.Normal,
+        mode: LightweightCharts.CrosshairMode.Normal,
       },
       localization: {
         priceFormatter: (price: number) => price.toLocaleString(),
       },
     });
 
-    const candleSeries = chart.addSeries(CandlestickSeries, {
+    const extendedChart = chart as IChartApi & {
+      addCandlestickSeries?: (
+        options?: CandlestickSeriesPartialOptions
+      ) => ISeriesApi<'Candlestick'>;
+      addHistogramSeries?: (
+        options?: HistogramSeriesPartialOptions
+      ) => ISeriesApi<'Histogram'>;
+    };
+
+    const candleSeriesOptions: CandlestickSeriesPartialOptions = {
       upColor: '#22c55e',
       borderUpColor: '#22c55e',
       wickUpColor: '#22c55e',
       downColor: '#ef4444',
       borderDownColor: '#ef4444',
       wickDownColor: '#ef4444',
-    });
+    };
 
-    const volumeSeries = chart.addSeries(HistogramSeries, {
+    const candleSeriesDefinition = LightweightCharts.CandlestickSeries;
+    if (!extendedChart.addCandlestickSeries && !candleSeriesDefinition) {
+      console.error('lightweight-charts build missing CandlestickSeries definition');
+      chart.remove();
+      return;
+    }
+
+    const candleSeries = extendedChart.addCandlestickSeries
+      ? extendedChart.addCandlestickSeries(candleSeriesOptions)
+      : chart.addSeries(candleSeriesDefinition, candleSeriesOptions);
+
+    const volumeSeriesOptions: HistogramSeriesPartialOptions = {
       color: 'rgba(148, 163, 184, 0.4)',
       priceFormat: {
         type: 'volume',
       },
       priceScaleId: '',
-    });
+    };
+
+    const histogramDefinition = LightweightCharts.HistogramSeries;
+    if (!extendedChart.addHistogramSeries && !histogramDefinition) {
+      console.error('lightweight-charts build missing HistogramSeries definition');
+      chart.remove();
+      return;
+    }
+
+    const volumeSeries = extendedChart.addHistogramSeries
+      ? extendedChart.addHistogramSeries(volumeSeriesOptions)
+      : chart.addSeries(histogramDefinition, volumeSeriesOptions);
 
     volumeSeries.priceScale().applyOptions({
       scaleMargins: {
