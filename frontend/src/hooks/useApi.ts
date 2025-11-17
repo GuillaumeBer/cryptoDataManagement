@@ -35,6 +35,23 @@ export function useFundingRates(params: {
   });
 }
 
+// OHLCV hooks
+export function useOHLCVData(params: {
+  asset?: string;
+  platform?: string;
+  timeframe?: string;
+  startDate?: Date;
+  endDate?: Date;
+  limit?: number;
+  offset?: number;
+}) {
+  return useQuery({
+    queryKey: ['ohlcv', params],
+    queryFn: () => apiClient.getOHLCV(params),
+    enabled: !!params.asset,
+  });
+}
+
 // Analytics hooks
 export function useAssetAnalytics(asset: string | null, platform: string = 'hyperliquid') {
   return useQuery({
