@@ -10,8 +10,21 @@ import UnifiedAssetRepository from '../models/UnifiedAssetRepository';
 import assetMappingService from '../services/assetMappingService';
 import { logger } from '../utils/logger';
 import createProgressStream from './createProgressStream';
+import type { OHLCVDataWithAsset } from '../models/types';
 
 const router = Router();
+
+const parseDecimal = (value: string | null) => (value === null ? null : Number(value));
+
+const serializeOHLCVRecord = (record: OHLCVDataWithAsset) => ({
+  ...record,
+  open: Number(record.open),
+  high: Number(record.high),
+  low: Number(record.low),
+  close: Number(record.close),
+  volume: parseDecimal(record.volume),
+  quote_volume: parseDecimal(record.quote_volume),
+});
 
 /**
  * GET /api/fetch/stream
@@ -402,17 +415,18 @@ router.get('/ohlcv', async (req: Request, res: Response) => {
 
     logger.debug('[API] Querying OHLCV with', query);
     const ohlcvData = await OHLCVRepository.find(query);
+    const serializedData = ohlcvData.map(serializeOHLCVRecord);
     logger.info('[API] OHLCV query completed', {
       asset,
       platform: query.platform || 'all',
       timeframe: query.timeframe || 'all',
-      results: ohlcvData.length,
+      results: serializedData.length,
     });
 
     res.json({
       success: true,
-      data: ohlcvData,
-      count: ohlcvData.length,
+      data: serializedData,
+      count: serializedData.length,
       query: {
         asset: query.asset || 'all',
         platform: query.platform || 'all',

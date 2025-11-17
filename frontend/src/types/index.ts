@@ -22,6 +22,23 @@ export interface FundingRate {
   asset_name: string | null;
 }
 
+export interface OHLCVRecord {
+  id: number;
+  asset_id: number;
+  platform: string;
+  timeframe: string;
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+  quote_volume: number | null;
+  trades_count: number | null;
+  asset_symbol: string;
+  asset_name: string | null;
+}
+
 export type ProgressPhase = 'fetch' | 'resample';
 
 export interface ProgressEvent {

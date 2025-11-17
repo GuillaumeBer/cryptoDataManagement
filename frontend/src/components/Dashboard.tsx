@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useSystemStatus, useAssets } from '../hooks/useApi';
 import AssetSelector from './AssetSelector';
 import FundingRateChart from './FundingRateChart';
+import OHLCVChart from './OHLCVChart';
 import Analytics from './Analytics';
 import DataFetcher from './DataFetcher';
 import StatusBar from './StatusBar';
@@ -229,6 +230,9 @@ export default function Dashboard() {
               <>
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                   <Analytics asset={selectedAsset} platform={selectedPlatform} />
+                </div>
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                  <OHLCVChart asset={selectedAsset} platform={selectedPlatform} />
                 </div>
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                   <FundingRateChart asset={selectedAsset} platform={selectedPlatform} />

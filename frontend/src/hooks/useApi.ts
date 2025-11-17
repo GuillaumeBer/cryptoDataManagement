@@ -35,6 +35,29 @@ export function useFundingRates(params: {
   });
 }
 
+// OHLCV hooks
+export function useOHLCV(params: {
+  asset?: string;
+  platform?: string;
+  timeframe?: string;
+  startDate?: Date;
+  endDate?: Date;
+  limit?: number;
+  offset?: number;
+}) {
+  const queryKey = {
+    ...params,
+    startDate: params.startDate ? params.startDate.toISOString() : undefined,
+    endDate: params.endDate ? params.endDate.toISOString() : undefined,
+  };
+
+  return useQuery({
+    queryKey: ['ohlcv', queryKey],
+    queryFn: () => apiClient.getOHLCV(params),
+    enabled: !!params.asset,
+  });
+}
+
 // Analytics hooks
 export function useAssetAnalytics(asset: string | null, platform: string = 'hyperliquid') {
   return useQuery({
