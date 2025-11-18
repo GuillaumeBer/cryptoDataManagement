@@ -8,7 +8,7 @@ const totalEnabledPlatforms = PLATFORMS.filter((platform) => platform.enabled).l
 
 export default function AssetCoverageView() {
   const [searchTerm, setSearchTerm] = useState('');
-  const { assets, isLoading, error } = useUnifiedAssets({ minPlatforms: 3 });
+  const { assets, isLoading, error } = useUnifiedAssets({ minPlatforms: 2 });
 
   const filteredAssets = useMemo(() => {
     if (!searchTerm) return assets;
@@ -29,12 +29,12 @@ export default function AssetCoverageView() {
           </p>
           <h2 className="text-xl font-semibold text-gray-900 mt-1">Multi-platform assets</h2>
           <p className="text-sm text-gray-500 mt-1">
-            Assets available on 3 or more platforms, with standardized names from CoinGecko.
+            Assets available on 2 or more platforms, with standardized names from CoinGecko.
             Price correlation validation ensures accurate cross-platform matching.
           </p>
         </div>
         <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-semibold">
-          3+ platforms
+          2+ platforms
         </span>
       </div>
 

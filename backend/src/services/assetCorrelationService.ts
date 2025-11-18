@@ -401,4 +401,69 @@ export class AssetCorrelationService {
 
     return correlations.reduce((sum, c) => sum + c, 0) / correlations.length;
   }
+
+  /**
+   * Validate a group of assets by price correlation
+   * Returns the largest cluster of correlated assets
+   */
+  async validateAssetGroup(
+    assetIds: number[],
+    days: number = 14,
+    correlationThreshold: number = 0.90
+  ): Promise<{
+    validatedAssetIds: number[];
+    avgCorrelation: number;
+    clusterCount: number;
+  }> {
+    // Single asset - always valid
+    if (assetIds.length === 1) {
+      return {
+        validatedAssetIds: assetIds,
+        avgCorrelation: 1.0,
+        clusterCount: 1,
+      };
+    }
+
+    // Fetch and align OHLCV data
+    const alignedData = await this.fetchAlignedOHLCV(assetIds, days);
+
+    if (alignedData.length < 2) {
+      // Not enough data for correlation
+      console.warn('Not enough OHLCV data for price correlation');
+      return {
+        validatedAssetIds: [],
+        avgCorrelation: 0,
+        clusterCount: 0,
+      };
+    }
+
+    // Calculate correlation matrix
+    const correlationMatrix = this.calculateCorrelationMatrix(alignedData);
+
+    // Find clusters
+    const clusters = this.findCorrelationClusters(
+      correlationMatrix,
+      correlationThreshold
+    );
+
+    if (clusters.length === 0) {
+      console.warn('No high-correlation cluster found, using all assets');
+      return {
+        validatedAssetIds: assetIds,
+        avgCorrelation: 0,
+        clusterCount: 0,
+      };
+    }
+
+    // Return the largest cluster
+    const largestCluster = clusters.reduce((prev, current) =>
+      current.assetIds.length > prev.assetIds.length ? current : prev
+    );
+
+    return {
+      validatedAssetIds: largestCluster.assetIds,
+      avgCorrelation: largestCluster.avgCorrelation,
+      clusterCount: clusters.length,
+    };
+  }
 }

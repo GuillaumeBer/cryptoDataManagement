@@ -43,6 +43,34 @@ export function normalizeSymbol(symbol: string, platform?: string): string {
 
   let normalized = symbol.toUpperCase().trim();
 
+  // Platform-specific normalization FIRST (before general suffix removal)
+  // This allows platform-specific patterns to be cleaned, then general cleanup can proceed
+  if (platform) {
+    switch (platform.toLowerCase()) {
+      case 'hyperliquid':
+        // Hyperliquid already uses clean symbols (BTC, ETH, etc.)
+        break;
+      case 'binance':
+      case 'bybit':
+        // Binance/Bybit use formats like "BTCUSDT"
+        // Will be handled by suffix removal below
+        break;
+      case 'okx':
+        // OKX uses formats like "BTC-USDT-SWAP"
+        // Remove -SWAP suffix first, then general suffix removal will clean up the rest
+        normalized = normalized.replace(/-SWAP$/, '');
+        break;
+      case 'dydx':
+        // DyDx V4 uses formats like "BTC-USD"
+        // Will be handled by suffix removal below
+        break;
+      case 'aster':
+        // Aster uses formats like "BTCUSDT"
+        // Will be handled by suffix removal below
+        break;
+    }
+  }
+
   // Remove common suffixes (try longest matches first)
   const sortedSuffixes = [...SUFFIXES_TO_REMOVE].sort((a, b) => b.length - a.length);
 
@@ -55,33 +83,6 @@ export function normalizeSymbol(symbol: string, platform?: string): string {
 
   // Remove trailing dashes or slashes
   normalized = normalized.replace(/[-/]+$/, '');
-
-  // Platform-specific normalization
-  if (platform) {
-    switch (platform.toLowerCase()) {
-      case 'hyperliquid':
-        // Hyperliquid already uses clean symbols (BTC, ETH, etc.)
-        break;
-      case 'binance':
-      case 'bybit':
-        // Binance/Bybit use formats like "BTCUSDT"
-        // Already handled by suffix removal
-        break;
-      case 'okx':
-        // OKX uses formats like "BTC-USDT-SWAP"
-        // Remove -SWAP suffix specifically
-        normalized = normalized.replace(/-SWAP$/, '');
-        break;
-      case 'dydx':
-        // DyDx V4 uses formats like "BTC-USD"
-        // Already handled by suffix removal
-        break;
-      case 'aster':
-        // Aster uses formats like "BTCUSDT"
-        // Already handled by suffix removal
-        break;
-    }
-  }
 
   logger.debug(`Symbol normalized: ${symbol} → ${normalized}${platform ? ` (${platform})` : ''}`);
   return normalized;

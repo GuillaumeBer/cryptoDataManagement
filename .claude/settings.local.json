@@ -20,7 +20,10 @@
       "Bash(python:*)",
       "Bash(npx tsx:*)",
       "Bash(cat:*)",
-      "Bash(timeout /t 3 /nobreak)"
+      "Bash(timeout /t 3 /nobreak)",
+      "Bash(timeout /t 10 /nobreak)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
