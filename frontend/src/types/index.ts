@@ -18,6 +18,7 @@ export interface UnifiedAsset {
   coingecko_id: string | null;
   coingecko_name: string | null;
   coingecko_symbol: string | null;
+  market_cap_usd: number | null;
   created_at: string;
   updated_at: string;
   platform_count: number;

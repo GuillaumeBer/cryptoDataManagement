@@ -118,6 +118,19 @@ export class AssetMappingBuilder {
           `Matched to CoinGecko: ${coingeckoCoin.name} (${coingeckoCoin.id})`
         );
 
+        // Fetch market cap from CoinGecko
+        let marketCap: number | null = null;
+        try {
+          const marketData = await this.coingeckoClient.getMarketData(250, 1);
+          const coinMarketData = marketData.find(m => m.id === coingeckoCoin.id);
+          if (coinMarketData) {
+            marketCap = coinMarketData.market_cap;
+            logger.info(`Market cap for ${coingeckoCoin.name}: $${marketCap.toLocaleString()}`);
+          }
+        } catch (error) {
+          logger.warn(`Could not fetch market cap for ${coingeckoCoin.name}:`, error);
+        }
+
         // Price validation if requested and multiple assets
         let validatedAssets = group.assets;
         let avgCorrelation: number | null = null;
@@ -171,6 +184,7 @@ export class AssetMappingBuilder {
             coingecko_id: coingeckoCoin.id,
             coingecko_name: coingeckoCoin.name,
             coingecko_symbol: coingeckoCoin.symbol,
+            market_cap_usd: marketCap,
           });
           unifiedAssetsCreated++;
         } else {
@@ -180,6 +194,7 @@ export class AssetMappingBuilder {
             coingecko_id: coingeckoCoin.id,
             coingecko_name: coingeckoCoin.name,
             coingecko_symbol: coingeckoCoin.symbol,
+            market_cap_usd: marketCap,
           });
         }
 
@@ -274,6 +289,7 @@ export class AssetMappingBuilder {
         coingecko_id: ua.coingecko_id,
         coingecko_name: ua.coingecko_name,
         coingecko_symbol: ua.coingecko_symbol,
+        market_cap_usd: ua.market_cap_usd ? parseInt(ua.market_cap_usd) : null,
         platform_count: ua.platform_count,
         platforms: ua.platforms,
         avg_confidence: ua.avg_confidence,

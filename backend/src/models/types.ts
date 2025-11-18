@@ -132,6 +132,7 @@ export interface UnifiedAsset {
   coingecko_id: string | null;
   coingecko_name: string | null;
   coingecko_symbol: string | null;
+  market_cap_usd: number | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -156,6 +157,7 @@ export interface CreateUnifiedAssetParams {
   coingecko_id?: string;
   coingecko_name?: string;
   coingecko_symbol?: string;
+  market_cap_usd?: number | null;
 }
 
 export interface CreateAssetMappingParams {
