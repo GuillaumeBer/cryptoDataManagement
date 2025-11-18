@@ -46,7 +46,7 @@ export class AssetMappingRepository {
    * Create a new asset mapping
    */
   async create(params: CreateAssetMappingParams): Promise<AssetMapping> {
-    const { unified_asset_id, asset_id, confidence_score, mapping_method, price_used } = params;
+    const { unified_asset_id, asset_id, confidence_score, mapping_method, price_used, price_correlation, last_validated_at } = params;
 
     const result = await query<AssetMapping>(
       `INSERT INTO asset_mappings (
@@ -54,13 +54,17 @@ export class AssetMappingRepository {
         asset_id,
         confidence_score,
         mapping_method,
-        price_used
+        price_used,
+        price_correlation,
+        last_validated_at
       )
-       VALUES ($1, $2, $3, $4, $5)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (unified_asset_id, asset_id) DO UPDATE
        SET confidence_score = EXCLUDED.confidence_score,
            mapping_method = EXCLUDED.mapping_method,
            price_used = EXCLUDED.price_used,
+           price_correlation = EXCLUDED.price_correlation,
+           last_validated_at = EXCLUDED.last_validated_at,
            updated_at = NOW()
        RETURNING *`,
       [
@@ -69,6 +73,8 @@ export class AssetMappingRepository {
         confidence_score || 100,
         mapping_method,
         price_used || null,
+        price_correlation || null,
+        last_validated_at || null,
       ]
     );
 
@@ -87,7 +93,7 @@ export class AssetMappingRepository {
     const values = mappings
       .map(
         (_, idx) =>
-          `($${idx * 5 + 1}, $${idx * 5 + 2}, $${idx * 5 + 3}, $${idx * 5 + 4}, $${idx * 5 + 5})`
+          `($${idx * 7 + 1}, $${idx * 7 + 2}, $${idx * 7 + 3}, $${idx * 7 + 4}, $${idx * 7 + 5}, $${idx * 7 + 6}, $${idx * 7 + 7})`
       )
       .join(', ');
 
@@ -97,6 +103,8 @@ export class AssetMappingRepository {
       m.confidence_score || 100,
       m.mapping_method,
       m.price_used || null,
+      m.price_correlation || null,
+      m.last_validated_at || null,
     ]);
 
     const result = await query(
@@ -105,13 +113,17 @@ export class AssetMappingRepository {
         asset_id,
         confidence_score,
         mapping_method,
-        price_used
+        price_used,
+        price_correlation,
+        last_validated_at
       )
        VALUES ${values}
        ON CONFLICT (unified_asset_id, asset_id) DO UPDATE
        SET confidence_score = EXCLUDED.confidence_score,
            mapping_method = EXCLUDED.mapping_method,
            price_used = EXCLUDED.price_used,
+           price_correlation = EXCLUDED.price_correlation,
+           last_validated_at = EXCLUDED.last_validated_at,
            updated_at = NOW()`,
       params
     );
@@ -127,7 +139,7 @@ export class AssetMappingRepository {
     id: number,
     params: Partial<Omit<CreateAssetMappingParams, 'unified_asset_id' | 'asset_id'>>
   ): Promise<AssetMapping | null> {
-    const { confidence_score, mapping_method, price_used } = params;
+    const { confidence_score, mapping_method, price_used, price_correlation, last_validated_at } = params;
 
     const updates: string[] = [];
     const values: any[] = [];
@@ -146,6 +158,16 @@ export class AssetMappingRepository {
     if (price_used !== undefined) {
       updates.push(`price_used = $${paramIndex++}`);
       values.push(price_used);
+    }
+
+    if (price_correlation !== undefined) {
+      updates.push(`price_correlation = $${paramIndex++}`);
+      values.push(price_correlation);
+    }
+
+    if (last_validated_at !== undefined) {
+      updates.push(`last_validated_at = $${paramIndex++}`);
+      values.push(last_validated_at);
     }
 
     if (updates.length === 0) {

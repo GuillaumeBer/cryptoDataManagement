@@ -4,6 +4,18 @@ import { logger } from '../utils/logger';
 
 export class AssetRepository {
   /**
+   * Find asset by ID
+   */
+  async findById(id: number): Promise<Asset | null> {
+    const result = await query<Asset>(
+      'SELECT * FROM assets WHERE id = $1',
+      [id]
+    );
+
+    return result.rows[0] || null;
+  }
+
+  /**
    * Find asset by symbol and platform
    */
   async findBySymbol(symbol: string, platform: string): Promise<Asset | null> {

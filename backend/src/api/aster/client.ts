@@ -147,11 +147,11 @@ export class AsterClient {
    * Fetch funding history for multiple symbols with rate limiting
    *
    * Aster enforces rate limits similar to Binance
-   * Default delay: 200ms between requests to avoid 429 errors
+   * Using conservative 700ms delay (~86 req/min) to ensure safe operation
    */
   async getFundingHistoryBatch(
     symbols: string[],
-    delayMs: number = 200,
+    delayMs: number = 700,
     concurrency: number = 1,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FetchedFundingData[]>> {
@@ -197,7 +197,7 @@ export class AsterClient {
 
   /**
    * Fetch OHLCV (kline) history for a specific symbol
-   * Endpoint: GET /klines (similar to Binance)
+   * Endpoint: GET /fapi/v1/klines (Binance-compatible)
    *
    * API Documentation:
    * - Aster API is similar to Binance Futures API
@@ -205,7 +205,7 @@ export class AsterClient {
    * - Interval: "1h" for 1-hour candles
    *
    * Rate Limits:
-   * - Conservative approach: 100ms delay
+   * - Conservative approach: 700ms delay (~86 req/min)
    */
   async getOHLCV(symbol: string, interval: string = '1h'): Promise<FetchedOHLCVData[]> {
     try {
@@ -216,7 +216,7 @@ export class AsterClient {
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
       const endTime = Date.now();
 
-      const response = await this.client.get<AsterKline[]>('/klines', {
+      const response = await this.client.get<AsterKline[]>('/fapi/v1/klines', {
         params: {
           symbol,
           interval,
@@ -225,6 +225,9 @@ export class AsterClient {
           limit: 1500, // Max allowed (similar to Binance)
         },
       });
+
+      // Temporary log to inspect raw API response
+      logger.info(`Raw OHLCV data for ${symbol} from Aster:`, response.data);
 
       const klines = response.data;
       if (!klines || !Array.isArray(klines)) {
@@ -240,8 +243,8 @@ export class AsterClient {
         low: kline[3],
         close: kline[4],
         volume: kline[5],
-        quoteVolume: '0', // Aster might not provide quote volume, using 0 as placeholder
-        tradesCount: kline[7],
+        quoteVolume: kline[7], // Quote asset volume (following Binance format)
+        tradesCount: kline[8], // Number of trades (was incorrectly at index 7)
       }));
 
       logger.debug(`Fetched ${results.length} OHLCV records for ${symbol}`);
@@ -257,13 +260,14 @@ export class AsterClient {
    * Fetch OHLCV history for multiple symbols with rate limiting
    *
    * Aster Rate Limits:
-   * - Conservative delay: 100ms to match funding rate fetching pattern
+   * - Exact limits unknown, using conservative 700ms delay with concurrency=1
+   * - This provides ~86 req/min throughput, safe for most exchanges
    */
   async getOHLCVBatch(
     symbols: string[],
     interval: string = '1h',
-    delayMs: number = 100,
-    concurrency: number = 5,
+    delayMs: number = 700,
+    concurrency: number = 1,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FetchedOHLCVData[]>> {
     const results = new Map<string, FetchedOHLCVData[]>();

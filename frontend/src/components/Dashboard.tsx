@@ -43,11 +43,6 @@ export default function Dashboard() {
     isLoading: isAssetsLoading,
     error: assetsError,
   } = useAssets(selectedPlatform);
-  const {
-    data: allAssets,
-    isLoading: isAllAssetsLoading,
-    error: allAssetsError,
-  } = useAssets();
 
   // Reset selected asset when switching platforms
   const handlePlatformChange = (platform: Platform) => {
@@ -157,11 +152,7 @@ export default function Dashboard() {
           </div>
           <div className="space-y-6">
             <SchedulerWidget scheduler={globalStatus?.scheduler} recentErrors={globalStatus?.recentErrors} />
-            <AssetCoverageView
-              assets={allAssets}
-              isLoading={isAllAssetsLoading}
-              error={allAssetsError}
-            />
+            <AssetCoverageView />
           </div>
         </section>
         )}

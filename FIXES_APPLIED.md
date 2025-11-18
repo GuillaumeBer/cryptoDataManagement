@@ -1,4 +1,49 @@
 # Platform Data Fixes Applied
+**Date:** November 18, 2025
+**Status:** ✅ Feature enhancement completed
+
+---
+
+## Summary of Fixes
+
+### 1. ✅ Asset Coverage View Enhancement
+**Issue:** The asset-centric view was showing assets available on 2 or more platforms, but the user requested to see assets available on 3 or more platforms.
+
+**Impact:** The view was not matching the user's requirement.
+
+**Fix Applied:**
+Updated `frontend/src/components/AssetCoverageView.tsx`:
+- Changed the `minPlatforms` parameter for the `useUnifiedAssets` hook from `2` to `3`.
+- Updated the descriptive text to reflect that the view now shows assets available on 3 or more platforms.
+- Updated the badge to '3+ platforms'.
+
+**Code Changes:**
+```typescript
+// BEFORE:
+const { assets, isLoading, error } = useUnifiedAssets({ minPlatforms: 2 });
+// ...
+<p className="text-sm text-gray-500 mt-1">
+  Assets available on 2 or more platforms...
+</p>
+<span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-semibold">
+  2+ platforms
+</span>
+
+// AFTER:
+const { assets, isLoading, error } = useUnifiedAssets({ minPlatforms: 3 });
+// ...
+<p className="text-sm text-gray-500 mt-1">
+  Assets available on 3 or more platforms...
+</p>
+<span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-semibold">
+  3+ platforms
+</span>
+```
+
+**Verification:** ✅ The asset coverage view now correctly filters and displays assets available on 3 or more platforms.
+
+---
+# Platform Data Fixes Applied
 **Date:** November 15, 2025
 **Status:** ✅ Major issues resolved
 
@@ -177,6 +222,7 @@ curl -X POST http://localhost:3000/api/fetch?platform=okx
 
 ### Frontend
 - ✅ `frontend/src/components/FundingRateChart.tsx` - Fixed interval logic
+- ✅ `frontend/src/components/AssetCoverageView.tsx` - Enhanced to filter by 3+ platforms
 
 ### Documentation
 - ✅ `VERIFICATION_REPORT.md` - NEW initial verification results

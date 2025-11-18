@@ -64,59 +64,67 @@ interface CustomizedLayerProps {
   yAxisMap?: AxisMap;
 }
 
-const CandlestickLayer = ({ data, width = 8 }: { data: ChartCandle[]; width?: number }) => (
-  <Customized
-    component={(props: CustomizedLayerProps) => {
-      const xAxisMap = props.xAxisMap ?? {};
-      const yAxisMap = props.yAxisMap ?? {};
-      const xAxis =
-        xAxisMap[TIME_AXIS_ID] ?? Object.values(xAxisMap)[0];
-      const yAxis =
-        yAxisMap[PRICE_AXIS_ID] ?? Object.values(yAxisMap)[0];
+// Create candlestick renderer with data closure
+const createCandlestickRenderer = (chartData: ChartCandle[], candleWidth: number = 10) => {
+  return (props: any) => {
+    const { xAxisMap, yAxisMap } = props;
 
-      if (!xAxis?.scale || !yAxis?.scale) {
-        return null;
-      }
+    if (!xAxisMap || !yAxisMap) {
+      return null;
+    }
 
-      return (
-        <g>
-          {data.map((candle) => {
-            const x = xAxis.scale!(candle.timestamp);
-            const highY = yAxis.scale!(candle.high);
-            const lowY = yAxis.scale!(candle.low);
-            const openY = yAxis.scale!(candle.open);
-            const closeY = yAxis.scale!(candle.close);
-            const color = candle.close >= candle.open ? '#16a34a' : '#dc2626';
-            const rectY = Math.min(openY, closeY);
-            const rectHeight = Math.max(Math.abs(closeY - openY), 1);
+    const xAxis = xAxisMap[TIME_AXIS_ID] || Object.values(xAxisMap)[0];
+    const yAxis = yAxisMap[PRICE_AXIS_ID] || Object.values(yAxisMap)[0];
 
-            return (
-              <g key={candle.timestamp}>
-                <line
-                  x1={x}
-                  x2={x}
-                  y1={highY}
-                  y2={lowY}
-                  stroke={color}
-                  strokeWidth={1}
-                />
-                <rect
-                  x={x - width / 2}
-                  width={width}
-                  y={rectY}
-                  height={rectHeight}
-                  fill={color}
-                  stroke={color}
-                  rx={1}
-                />
-              </g>
-            );
-          })}
-        </g>
-      );
-    }}
-  />
-);
+    if (!xAxis?.scale || !yAxis?.scale) {
+      return null;
+    }
+
+    return (
+      <g className="candlesticks">
+        {chartData.map((candle, index) => {
+          const x = xAxis.scale(candle.timestamp);
+          const highY = yAxis.scale(candle.high);
+          const lowY = yAxis.scale(candle.low);
+          const openY = yAxis.scale(candle.open);
+          const closeY = yAxis.scale(candle.close);
+          const color = candle.close >= candle.open ? '#16a34a' : '#dc2626';
+          const rectY = Math.min(openY, closeY);
+          const rectHeight = Math.max(Math.abs(closeY - openY), 1);
+
+          // Skip if coordinates are invalid
+          if (isNaN(x) || isNaN(highY) || isNaN(lowY) || isNaN(openY) || isNaN(closeY)) {
+            return null;
+          }
+
+          return (
+            <g key={candle.timestamp}>
+              {/* High-Low line (wick) */}
+              <line
+                x1={x}
+                x2={x}
+                y1={highY}
+                y2={lowY}
+                stroke={color}
+                strokeWidth={1}
+              />
+              {/* Open-Close body */}
+              <rect
+                x={x - candleWidth / 2}
+                width={candleWidth}
+                y={rectY}
+                height={rectHeight}
+                fill={color}
+                stroke={color}
+                strokeWidth={1}
+              />
+            </g>
+          );
+        })}
+      </g>
+    );
+  };
+};
 
 const CandleTooltip = ({ active, payload }: TooltipProps<number, string>) => {
   if (!active || !payload || payload.length === 0) {
@@ -162,29 +170,70 @@ export default function OHLCVChart({ asset, platform }: OHLCVChartProps) {
     return { startDate: start, endDate: end, selectedLabel: selected.label };
   }, [range]);
 
+  // Always fetch 1h data from the API, then resample client-side
   const { data, isLoading, error, isFetching } = useOHLCVData({
     asset,
     platform,
-    timeframe,
+    timeframe: '1h', // Always fetch 1h data
     startDate,
     endDate,
-    limit: 1000,
+    limit: 10000, // Increase limit since we need more 1h candles for resampling
   });
+
+  // Resample 1h candles to the selected timeframe
+  const resampleCandles = (candles: ChartCandle[], targetTimeframe: TimeframeId): ChartCandle[] => {
+    if (targetTimeframe === '1h' || candles.length === 0) return candles;
+
+    const intervalMs = targetTimeframe === '4h' ? 4 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
+    const resampled: ChartCandle[] = [];
+
+    // Group candles by target timeframe
+    const groups = new Map<number, ChartCandle[]>();
+    candles.forEach(candle => {
+      const bucketTime = Math.floor(candle.timestamp / intervalMs) * intervalMs;
+      if (!groups.has(bucketTime)) {
+        groups.set(bucketTime, []);
+      }
+      groups.get(bucketTime)!.push(candle);
+    });
+
+    // Convert groups to resampled candles
+    for (const [bucketTime, groupCandles] of groups.entries()) {
+      if (groupCandles.length === 0) continue;
+
+      groupCandles.sort((a, b) => a.timestamp - b.timestamp);
+      resampled.push({
+        timestamp: bucketTime,
+        iso: new Date(bucketTime).toISOString(),
+        open: groupCandles[0].open,
+        high: Math.max(...groupCandles.map(c => c.high)),
+        low: Math.min(...groupCandles.map(c => c.low)),
+        close: groupCandles[groupCandles.length - 1].close,
+        volume: groupCandles.reduce((sum, c) => sum + c.volume, 0),
+      });
+    }
+
+    return resampled.sort((a, b) => a.timestamp - b.timestamp);
+  };
 
   const chartData: ChartCandle[] = useMemo(() => {
     if (!data) return [];
-    return [...data]
+
+    const transformed = [...data]
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
       .map((entry) => ({
         timestamp: new Date(entry.timestamp).getTime(),
         iso: entry.timestamp,
-        open: Number(entry.open),
-        high: Number(entry.high),
-        low: Number(entry.low),
-        close: Number(entry.close),
-        volume: Number(entry.volume ?? 0),
+        open: entry.open,
+        high: entry.high,
+        low: entry.low,
+        close: entry.close,
+        volume: entry.volume ?? 0,
       }));
-  }, [data]);
+
+    // Resample to the selected timeframe
+    return resampleCandles(transformed, timeframe);
+  }, [data, timeframe]);
 
   const [minPrice, maxPrice] = useMemo(() => {
     if (!chartData.length) return [0, 0];
@@ -374,7 +423,14 @@ export default function OHLCVChart({ asset, platform }: OHLCVChartProps) {
               yAxisId={VOLUME_AXIS_ID}
               name="Volume"
             />
-            <CandlestickLayer data={chartData} width={10} />
+            <Customized
+              component={createCandlestickRenderer(
+                chartData,
+                timeframe === '1h' ? 6 : timeframe === '4h' ? 10 : 14
+              )}
+              xAxisId={TIME_AXIS_ID}
+              yAxisId={PRICE_AXIS_ID}
+            />
             <Brush
               dataKey="timestamp"
               height={24}

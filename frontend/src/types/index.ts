@@ -10,6 +10,22 @@ export interface Asset {
   daysStale?: number; // Number of days since last funding rate update
 }
 
+export interface UnifiedAsset {
+  id: number;
+  normalized_symbol: string;
+  display_name: string | null;
+  description: string | null;
+  coingecko_id: string | null;
+  coingecko_name: string | null;
+  coingecko_symbol: string | null;
+  created_at: string;
+  updated_at: string;
+  platform_count: number;
+  platforms: string[];
+  avg_confidence: number;
+  avg_correlation: number | string | null; // Can be string from database DECIMAL type
+}
+
 export interface FundingRate {
   id: number;
   asset_id: number;
@@ -27,12 +43,12 @@ export interface OHLCVRecord {
   asset_id: number;
   timestamp: string;
   timeframe: string;
-  open: string;
-  high: string;
-  low: string;
-  close: string;
-  volume: string | null;
-  quote_volume: string | null;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+  quote_volume: number | null;
   trades_count: number | null;
   platform: string;
   fetched_at: string;
@@ -42,13 +58,37 @@ export interface OHLCVRecord {
 
 export type ProgressPhase = 'fetch' | 'resample';
 
+export type FetchStage =
+  | 'assetDiscovery'
+  | 'fundingFetch'
+  | 'fundingStore'
+  | 'ohlcvFetch'
+  | 'ohlcvStore'
+  | 'resample';
+
+export type StageStatus = 'pending' | 'active' | 'complete';
+
+export interface ProgressStageSnapshot {
+  key: FetchStage;
+  label: string;
+  status: StageStatus;
+  completed: number;
+  total: number;
+  percentage: number;
+  currentItem?: string;
+  message?: string;
+}
+
 export interface ProgressEvent {
   type: 'start' | 'progress' | 'complete' | 'error';
   phase: ProgressPhase;
+  stage: FetchStage;
+  stages: ProgressStageSnapshot[];
   totalAssets: number;
   processedAssets: number;
   currentAsset?: string;
   recordsFetched: number;
+  ohlcvRecordsFetched?: number;
   resampleRecordsCreated?: number;
   resampleAssetsProcessed?: number;
   errors: string[];

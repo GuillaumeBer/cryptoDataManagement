@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useProgressStream } from '../hooks/useProgressStream';
 import { useToast } from '../hooks/useToast';
 import apiClient from '../services/api';
-import type { ProgressEvent } from '../types';
+import type { ProgressEvent, ProgressStageSnapshot } from '../types';
 
 interface DataFetcherProps {
   platform: string;
@@ -124,6 +124,27 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
     }
   };
 
+  const formatStageStatus = (status: ProgressStageSnapshot['status']) => {
+    switch (status) {
+      case 'active':
+        return 'In progress';
+      case 'complete':
+        return 'Completed';
+      default:
+        return 'Pending';
+    }
+  };
+
+  const getStageBarColor = (stage: ProgressStageSnapshot) => {
+    if (stage.status === 'complete') {
+      return 'bg-green-500';
+    }
+    if (stage.status === 'active') {
+      return 'bg-blue-600';
+    }
+    return 'bg-gray-300';
+  };
+
   const renderProgress = (current: ProgressEvent | null, fetching: boolean) => {
     if (!current && !fetching && !streamError) return null;
 
@@ -182,21 +203,69 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
     }
 
     if (current) {
+      const stageDetails = current.stages ?? [];
+      const activeStage =
+        stageDetails.find((stage) => stage.status === 'active') ??
+        (stageDetails.length > 0 ? stageDetails[stageDetails.length - 1] : undefined);
+      const summaryMessage =
+        current.message ??
+        (activeStage?.message ??
+          (activeStage ? `${activeStage.label} (${formatStageStatus(activeStage.status)})` : 'Processing data'));
+
       return (
-        <div className="mt-3 space-y-2">
-          <div className="w-full bg-gray-200 rounded-full h-2.5">
-            <div className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style={{ width: `${current.percentage}%` }} />
+        <div className="mt-3 space-y-3">
+          <div className="p-3 bg-blue-50 border border-blue-100 rounded">
+            <div className="flex items-center justify-between text-sm text-blue-900 font-medium">
+              <span>{summaryMessage}</span>
+              <span>{current.percentage}%</span>
+            </div>
+            <div className="w-full bg-blue-100 rounded-full h-2 mt-2">
+              <div
+                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${current.percentage}%` }}
+              />
+            </div>
+            <div className="text-xs text-blue-900 mt-2 flex flex-wrap gap-x-6 gap-y-1">
+              <span>
+                Assets processed: {current.processedAssets} / {current.totalAssets}
+              </span>
+              <span>Funding records: {current.recordsFetched}</span>
+              {typeof current.ohlcvRecordsFetched === 'number' && (
+                <span>OHLCV records: {current.ohlcvRecordsFetched}</span>
+              )}
+            </div>
+            {current.currentAsset && (
+              <p className="text-xs text-blue-800 mt-1 truncate">Current asset: {current.currentAsset}</p>
+            )}
           </div>
 
-          <div className="text-sm text-gray-700">
-            <p className="font-medium">
-              Processing: {current.processedAssets} / {current.totalAssets} assets ({current.percentage}%)
-            </p>
-            {current.currentAsset && (
-              <p className="text-xs text-gray-500 mt-1">Current: {current.currentAsset}</p>
-            )}
-            <p className="text-xs text-gray-500 mt-1">Records fetched: {current.recordsFetched}</p>
-          </div>
+          {stageDetails.length > 0 && (
+            <div className="space-y-2">
+              {stageDetails.map((stage) => (
+                <div key={stage.key} className="border border-gray-200 rounded-lg p-2">
+                  <div className="flex items-center justify-between text-xs text-gray-600">
+                    <span className="font-medium text-gray-800">{stage.label}</span>
+                    <span>{stage.percentage}%</span>
+                  </div>
+                  <div className="w-full bg-gray-100 rounded-full h-1.5 mt-1">
+                    <div
+                      className={`${getStageBarColor(stage)} h-1.5 rounded-full transition-all duration-300`}
+                      style={{ width: `${stage.percentage}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-gray-500 mt-1">
+                    <span>{formatStageStatus(stage.status)}</span>
+                    <span>
+                      {stage.completed}/{stage.total}
+                    </span>
+                  </div>
+                  {stage.status === 'active' && stage.currentItem && (
+                    <p className="text-[11px] text-gray-500 mt-1 truncate">Current: {stage.currentItem}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       );
     }

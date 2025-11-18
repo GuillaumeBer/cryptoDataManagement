@@ -1,73 +1,24 @@
 import { useMemo, useState } from 'react';
-import type { Asset } from '../types';
+import type { UnifiedAsset } from '../types';
 import { PLATFORMS } from '../constants/platforms';
-
-interface AssetCoverageViewProps {
-  assets?: Asset[];
-  isLoading?: boolean;
-  error?: unknown;
-}
-
-interface AggregatedAsset {
-  symbol: string;
-  platforms: string[];
-  minDaysStale?: number;
-}
+import { useUnifiedAssets } from '../hooks/useUnifiedAssets';
 
 const platformNames = Object.fromEntries(PLATFORMS.map((platform) => [platform.id, platform.name]));
 const totalEnabledPlatforms = PLATFORMS.filter((platform) => platform.enabled).length || PLATFORMS.length;
 
-function getFreshnessStyles(days?: number) {
-  if (days === undefined || days === 999) {
-    return { label: 'Awaiting data', className: 'bg-gray-100 text-gray-600' };
-  }
-  if (days <= 1) {
-    return { label: 'Updated today', className: 'bg-green-100 text-green-700' };
-  }
-  if (days <= 3) {
-    return { label: `${days}d old`, className: 'bg-yellow-100 text-yellow-700' };
-  }
-  return { label: `${days}d old`, className: 'bg-red-100 text-red-700' };
-}
-
-export default function AssetCoverageView({ assets, isLoading, error }: AssetCoverageViewProps) {
+export default function AssetCoverageView() {
   const [searchTerm, setSearchTerm] = useState('');
-
-  const aggregatedAssets = useMemo<AggregatedAsset[]>(() => {
-    if (!assets?.length) return [];
-
-    const grouped = new Map<string, AggregatedAsset>();
-
-    assets.forEach((asset) => {
-      const symbol = asset.symbol.toUpperCase();
-      const existing = grouped.get(symbol) ?? { symbol, platforms: [], minDaysStale: undefined };
-
-      if (!existing.platforms.includes(asset.platform)) {
-        existing.platforms.push(asset.platform);
-      }
-
-      const days = asset.daysStale ?? 999;
-      if (existing.minDaysStale === undefined || days < existing.minDaysStale) {
-        existing.minDaysStale = days;
-      }
-
-      grouped.set(symbol, existing);
-    });
-
-    return Array.from(grouped.values()).sort((a, b) => {
-      if (b.platforms.length === a.platforms.length) {
-        return a.symbol.localeCompare(b.symbol);
-      }
-      return b.platforms.length - a.platforms.length;
-    });
-  }, [assets]);
+  const { assets, isLoading, error } = useUnifiedAssets({ minPlatforms: 3 });
 
   const filteredAssets = useMemo(() => {
-    if (!searchTerm) return aggregatedAssets;
-    return aggregatedAssets.filter((asset) =>
-      asset.symbol.toLowerCase().includes(searchTerm.toLowerCase())
+    if (!searchTerm) return assets;
+    const searchLower = searchTerm.toLowerCase();
+    return assets.filter((asset) =>
+      asset.normalized_symbol.toLowerCase().includes(searchLower) ||
+      asset.display_name?.toLowerCase().includes(searchLower) ||
+      asset.coingecko_name?.toLowerCase().includes(searchLower)
     );
-  }, [aggregatedAssets, searchTerm]);
+  }, [assets, searchTerm]);
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 h-full flex flex-col">
@@ -76,14 +27,14 @@ export default function AssetCoverageView({ assets, isLoading, error }: AssetCov
           <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
             Asset-centric view
           </p>
-          <h2 className="text-xl font-semibold text-gray-900 mt-1">Cross-platform coverage</h2>
+          <h2 className="text-xl font-semibold text-gray-900 mt-1">Multi-platform assets</h2>
           <p className="text-sm text-gray-500 mt-1">
-            Understand which symbols exist on each venue today. Future metrics like open interest, volume and OHLCV
-            will reuse the same coverage map so the layout is already multi-metric friendly.
+            Assets available on 3 or more platforms, with standardized names from CoinGecko.
+            Price correlation validation ensures accurate cross-platform matching.
           </p>
         </div>
-        <span className="text-xs px-2 py-1 rounded-full bg-blue-50 text-blue-700 font-semibold">
-          Funding rate live
+        <span className="text-xs px-2 py-1 rounded-full bg-green-50 text-green-700 font-semibold">
+          3+ platforms
         </span>
       </div>
 
@@ -94,28 +45,30 @@ export default function AssetCoverageView({ assets, isLoading, error }: AssetCov
         <input
           id="asset-coverage-search"
           type="text"
-          placeholder="Search assets across platforms..."
+          placeholder="Search by name or symbol..."
           value={searchTerm}
           onChange={(event) => setSearchTerm(event.target.value)}
           className="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         <p className="text-xs text-gray-500 mt-2">
-          Showing {filteredAssets.length} of {aggregatedAssets.length} aggregated symbols
+          Showing {filteredAssets.length} of {assets.length} multi-platform assets
         </p>
       </div>
 
       <div className="mt-4 flex-1 overflow-hidden">
         {isLoading ? (
           <div className="h-full flex items-center justify-center">
-            <p className="text-sm text-gray-500">Loading asset overview...</p>
+            <p className="text-sm text-gray-500">Loading multi-platform assets...</p>
           </div>
         ) : error ? (
           <div className="h-full flex items-center justify-center">
-            <p className="text-sm text-red-600">Unable to load assets.</p>
+            <p className="text-sm text-red-600">Unable to load assets: {error.message}</p>
           </div>
         ) : filteredAssets.length === 0 ? (
           <div className="h-full flex items-center justify-center">
-            <p className="text-sm text-gray-500">No assets match "{searchTerm}".</p>
+            <p className="text-sm text-gray-500">
+              {searchTerm ? `No assets match "${searchTerm}"` : 'No multi-platform assets found'}
+            </p>
           </div>
         ) : (
           <div className="max-h-80 overflow-y-auto border border-gray-100 rounded-lg">
@@ -123,25 +76,40 @@ export default function AssetCoverageView({ assets, isLoading, error }: AssetCov
               <thead className="bg-gray-50 text-left text-xs font-semibold text-gray-500">
                 <tr>
                   <th className="px-4 py-2">Asset</th>
+                  <th className="px-4 py-2">Symbol</th>
                   <th className="px-4 py-2">Platforms</th>
                   <th className="px-4 py-2">Coverage</th>
-                  <th className="px-4 py-2">Freshness</th>
+                  <th className="px-4 py-2">Confidence</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filteredAssets.map((asset) => {
-                  const freshness = getFreshnessStyles(asset.minDaysStale);
-                  const coveragePercent = Math.round((asset.platforms.length / totalEnabledPlatforms) * 100);
+                  const displayName = asset.display_name || asset.coingecko_name || asset.normalized_symbol;
+                  const coveragePercent = Math.round((asset.platform_count / totalEnabledPlatforms) * 100);
+                  const correlationValue = asset.avg_correlation ? Number(asset.avg_correlation) : null;
+                  const hasCorrelation = correlationValue !== null && correlationValue > 0;
 
                   return (
-                    <tr key={asset.symbol}>
-                      <td className="px-4 py-3 font-semibold text-gray-900">{asset.symbol}</td>
+                    <tr key={asset.id}>
+                      <td className="px-4 py-3">
+                        <div>
+                          <p className="font-semibold text-gray-900">{displayName}</p>
+                          {asset.coingecko_id && (
+                            <p className="text-xs text-gray-500 mt-0.5">via CoinGecko</p>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">
+                          {asset.normalized_symbol}
+                        </span>
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">
                           {asset.platforms.map((platform) => (
                             <span
-                              key={`${asset.symbol}-${platform}`}
-                              className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700"
+                              key={`${asset.id}-${platform}`}
+                              className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700"
                             >
                               {platformNames[platform] ?? platform}
                             </span>
@@ -150,7 +118,7 @@ export default function AssetCoverageView({ assets, isLoading, error }: AssetCov
                       </td>
                       <td className="px-4 py-3">
                         <p className="text-xs text-gray-500 mb-1">
-                          {asset.platforms.length} / {totalEnabledPlatforms} venues
+                          {asset.platform_count} / {totalEnabledPlatforms} platforms
                         </p>
                         <div className="h-2 rounded-full bg-gray-100">
                           <div
@@ -160,9 +128,20 @@ export default function AssetCoverageView({ assets, isLoading, error }: AssetCov
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${freshness.className}`}>
-                          {freshness.label}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                            asset.avg_confidence >= 98 ? 'bg-green-100 text-green-700' :
+                            asset.avg_confidence >= 90 ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>
+                            {asset.avg_confidence}% confidence
+                          </span>
+                          {hasCorrelation && correlationValue && (
+                            <span className="text-xs text-gray-500">
+                              r={correlationValue.toFixed(3)}
+                            </span>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

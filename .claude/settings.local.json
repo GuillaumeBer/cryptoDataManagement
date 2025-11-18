@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git push)",
+      "Bash(node -e:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nAdd Jupiter DEX verification and fix GMX V2 integration\n\nThis commit adds Jupiter DEX to the verification system and fixes critical issues with the GMX V2 integration.\n\nBackend Changes:\n- Add Jupiter verification function to verify-platform-data.ts with Dune API integration\n- Increase Jupiter/Dune API timeout from 30s to 120s for slow query execution\n- Fix GMX V2 GraphQL query to use ''marketInfos'' instead of deprecated ''markets''\n- Fix GMX V2 funding rate fields to use ''feeUsdPerPoolValue'' (actual schema) instead of non-existent fields\n- Add asset deduplication in dataFetcher.ts to handle GMX V2''s multiple markets per token\n- Improve GMX V2 error handling to return empty arrays instead of throwing errors\n\nKey Fixes:\n- GMX V2 Schema Update: Changed query from ''markets'' to ''marketInfos'' to match current subgraph\n- GMX V2 Duplicate Prevention: Deduplicate assets by symbol to avoid PostgreSQL constraint violation\n- GMX V2 Field Mapping: Use correct CollectedMarketFeesInfo fields (feeUsdPerPoolValue, cumulativeFeeUsdPerPoolValue)\n- Jupiter Timeout: Extended Dune query polling from 30 attempts (30s) to 60 attempts (120s)\n\nTesting:\n- Jupiter verification tests SOL, ETH, WBTC assets via Dune Analytics\n- GMX V2 successfully fetches 109 unique markets from marketInfos\n- Asset deduplication prevents \"ON CONFLICT DO UPDATE cannot affect row a second time\" error\n\nNote: GMX V2 uses borrowing fees (not traditional funding rates), so many markets may show no data\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(npm run dev:*)",
+      "Bash(npm run db:query:*)",
+      "Bash(curl:*)",
+      "Bash(tasklist:*)",
+      "Bash(findstr:*)",
+      "Bash(timeout /t 5 /nobreak)",
+      "Bash(netstat:*)",
+      "Bash(xargs -I {} taskkill.exe //F //PID {})",
+      "Bash(timeout /t 60 /nobreak)",
+      "Bash(npm run:*)",
+      "Bash(taskkill.exe //F //PID 146676)",
+      "Bash(taskkill:*)",
+      "Bash(taskkill.exe:*)",
+      "Bash(python:*)",
+      "Bash(npx tsx:*)",
+      "Bash(cat:*)",
+      "Bash(timeout /t 3 /nobreak)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

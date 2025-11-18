@@ -415,6 +415,7 @@ router.get('/ohlcv', async (req: Request, res: Response) => {
 
     logger.debug('[API] Querying OHLCV with', query);
     const ohlcvData = await OHLCVRepository.find(query);
+    logger.info(`[API] Found ${ohlcvData.length} OHLCV records for query:`, query);
     const serializedData = ohlcvData.map(serializeOHLCVRecord);
     logger.info('[API] OHLCV query completed', {
       asset,
@@ -539,6 +540,41 @@ router.get('/unified-assets', async (_req: Request, res: Response) => {
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch unified assets',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
+ * GET /api/unified-assets/multi-platform?minPlatforms=3
+ * Get unified assets available on at least N platforms
+ */
+router.get('/unified-assets/multi-platform', async (req: Request, res: Response) => {
+  try {
+    const minPlatforms = parseInt(req.query.minPlatforms as string) || 3;
+
+    if (minPlatforms < 1 || minPlatforms > 10) {
+      return res.status(400).json({
+        success: false,
+        message: 'minPlatforms must be between 1 and 10',
+      });
+    }
+
+    const multiPlatformAssets = await UnifiedAssetRepository.findMultiPlatformAssets(
+      minPlatforms
+    );
+
+    return res.json({
+      success: true,
+      data: multiPlatformAssets,
+      count: multiPlatformAssets.length,
+      minPlatforms,
+    });
+  } catch (error) {
+    logger.error('Multi-platform assets endpoint error', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch multi-platform assets',
       error: `${error}`,
     });
   }

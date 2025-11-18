@@ -260,7 +260,7 @@ export class DyDxClient {
       const fromISO = new Date(Date.now() - (hoursAgo * 60 * 60 * 1000)).toISOString();
       const toISO = new Date().toISOString();
 
-      const response = await this.client.get<DyDxCandlesResponse>(`/v4/candles/perpetualMarkets/${symbol}`, {
+      const response = await this.client.get<DyDxCandlesResponse>(`/candles/perpetualMarkets/${symbol}`, {
         params: {
           resolution,
           fromISO,
@@ -300,13 +300,14 @@ export class DyDxClient {
    * Fetch OHLCV history for multiple symbols with rate limiting
    *
    * DyDx Rate Limits:
-   * - Conservative delay: 100ms to match funding rate fetching pattern
+   * - OHLCV endpoints have stricter rate limits than funding endpoints
+   * - Use 1 concurrent request with 500ms delay to avoid 429 errors
    */
   async getOHLCVBatch(
     symbols: string[],
     resolution: string = '1HOUR',
-    delayMs: number = 100,
-    concurrency: number = 5,
+    delayMs: number = 500,
+    concurrency: number = 1,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FetchedOHLCVData[]>> {
     const results = new Map<string, FetchedOHLCVData[]>();

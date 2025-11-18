@@ -128,6 +128,9 @@ export interface UnifiedAsset {
   normalized_symbol: string;
   display_name: string | null;
   description: string | null;
+  coingecko_id: string | null;
+  coingecko_name: string | null;
+  coingecko_symbol: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -139,6 +142,8 @@ export interface AssetMapping {
   confidence_score: number;
   mapping_method: 'auto_symbol' | 'auto_price' | 'manual';
   price_used: string | null;
+  price_correlation: string | null;
+  last_validated_at: Date | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -147,6 +152,9 @@ export interface CreateUnifiedAssetParams {
   normalized_symbol: string;
   display_name?: string;
   description?: string;
+  coingecko_id?: string;
+  coingecko_name?: string;
+  coingecko_symbol?: string;
 }
 
 export interface CreateAssetMappingParams {
@@ -155,6 +163,8 @@ export interface CreateAssetMappingParams {
   confidence_score?: number;
   mapping_method: 'auto_symbol' | 'auto_price' | 'manual';
   price_used?: string;
+  price_correlation?: number;
+  last_validated_at?: Date;
 }
 
 export interface UnifiedAssetWithMappings extends UnifiedAsset {

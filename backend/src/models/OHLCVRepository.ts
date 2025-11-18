@@ -44,9 +44,12 @@ export class OHLCVRepository {
    */
   async bulkInsert(records: CreateOHLCVParams[]): Promise<number> {
     if (records.length === 0) return 0;
+    // PostgreSQL has a limit of 65,535 parameters per query
+    // With 11 parameters per record, max safe chunk size is ~5,900 records
+    // Using 100 records per chunk (1,100 parameters) to be very conservative
     const chunkSize = Math.max(
       1,
-      parseInt(process.env.OHLCV_INSERT_CHUNK_SIZE || '5000', 10)
+      parseInt(process.env.OHLCV_INSERT_CHUNK_SIZE || '100', 10)
     );
     const chunkCount = Math.ceil(records.length / chunkSize);
     let inserted = 0;

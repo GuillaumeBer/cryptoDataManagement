@@ -1,5 +1,38 @@
 import winston from 'winston';
 
+// Safely stringify meta objects that may contain circular references
+const safeStringify = (value: unknown): string => {
+  const seen = new WeakSet<object>();
+  return JSON.stringify(
+    value,
+    (_, val) => {
+      if (val instanceof Error) {
+        const plainError: Record<string, unknown> = {
+          name: val.name,
+          message: val.message,
+          stack: val.stack,
+        };
+        const errorWithProps = val as Error & Record<string, unknown>;
+        Object.getOwnPropertyNames(errorWithProps).forEach((key) => {
+          // Include any custom properties the error might have
+          plainError[key] = errorWithProps[key];
+        });
+        return plainError;
+      }
+
+      if (typeof val === 'object' && val !== null) {
+        const objectVal = val as Record<string, unknown>;
+        if (seen.has(objectVal)) {
+          return '[Circular]';
+        }
+        seen.add(objectVal);
+      }
+
+      return val;
+    }
+  );
+};
+
 const logLevel = process.env.LOG_LEVEL || 'info';
 
 export const logger = winston.createLogger({
@@ -16,7 +49,7 @@ export const logger = winston.createLogger({
         winston.format.printf(({ timestamp, level, message, ...meta }) => {
           let msg = `${timestamp} [${level}]: ${message}`;
           if (Object.keys(meta).length > 0) {
-            msg += ` ${JSON.stringify(meta)}`;
+            msg += ` ${safeStringify(meta)}`;
           }
           return msg;
         })

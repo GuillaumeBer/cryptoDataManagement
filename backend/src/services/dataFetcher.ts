@@ -57,9 +57,32 @@ type PlatformClient = {
 
 export type ProgressPhase = 'fetch' | 'resample';
 
+export type FetchStage =
+  | 'assetDiscovery'
+  | 'fundingFetch'
+  | 'fundingStore'
+  | 'ohlcvFetch'
+  | 'ohlcvStore'
+  | 'resample';
+
+export type StageStatus = 'pending' | 'active' | 'complete';
+
+export interface ProgressStageSnapshot {
+  key: FetchStage;
+  label: string;
+  status: StageStatus;
+  completed: number;
+  total: number;
+  percentage: number;
+  currentItem?: string;
+  message?: string;
+}
+
 export interface ProgressEvent {
   type: 'start' | 'progress' | 'complete' | 'error';
   phase: ProgressPhase;
+  stage: FetchStage;
+  stages: ProgressStageSnapshot[];
   totalAssets: number;
   processedAssets: number;
   currentAsset?: string;
@@ -70,6 +93,135 @@ export interface ProgressEvent {
   errors: string[];
   percentage: number;
   message?: string;
+}
+
+const STAGE_LABELS: Record<FetchStage, string> = {
+  assetDiscovery: 'Discover assets',
+  fundingFetch: 'Fetch funding rates',
+  fundingStore: 'Store funding rates',
+  ohlcvFetch: 'Fetch OHLCV data',
+  ohlcvStore: 'Store OHLCV data',
+  resample: 'Generate 8h aggregates',
+};
+
+type StageStateMap = Map<FetchStage, ProgressStageSnapshot>;
+
+const cloneStageSnapshots = (order: FetchStage[], map: StageStateMap): ProgressStageSnapshot[] =>
+  order
+    .map((key) => {
+      const snapshot = map.get(key);
+      return snapshot ? { ...snapshot } : undefined;
+    })
+    .filter((stage): stage is ProgressStageSnapshot => Boolean(stage));
+
+const initializeStageMap = (
+  order: FetchStage[],
+  totals: Partial<Record<FetchStage, number>>
+): StageStateMap => {
+  const map: StageStateMap = new Map();
+  order.forEach((key) => {
+    const total = totals[key] ?? 0;
+    map.set(key, {
+      key,
+      label: STAGE_LABELS[key],
+      status: 'pending',
+      completed: 0,
+      total,
+      percentage: 0,
+    });
+  });
+  return map;
+};
+
+const updateStage = (
+  map: StageStateMap,
+  key: FetchStage,
+  updates: Partial<ProgressStageSnapshot>
+): ProgressStageSnapshot => {
+  const current = map.get(key);
+  if (!current) {
+    throw new Error(`Unknown progress stage: ${key}`);
+  }
+  const total = updates.total ?? current.total;
+  const rawCompleted =
+    typeof updates.completed === 'number'
+      ? Math.max(0, updates.completed)
+      : current.completed;
+  const completed = total > 0 ? Math.min(rawCompleted, total) : rawCompleted;
+  let percentage = updates.percentage ?? current.percentage;
+  if (updates.percentage === undefined) {
+    if (total > 0) {
+      percentage = Math.min(100, Math.round((completed / total) * 100));
+    } else if ((updates.status ?? current.status) === 'complete') {
+      percentage = 100;
+    } else if (completed > 0) {
+      percentage = 100;
+    } else {
+      percentage = 0;
+    }
+  }
+
+  const next: ProgressStageSnapshot = {
+    ...current,
+    ...updates,
+    total,
+    completed,
+    percentage,
+  };
+  map.set(key, next);
+  return next;
+};
+
+const calculateOverallPercentage = (map: StageStateMap, order: FetchStage[]): number => {
+  let weightedTotal = 0;
+  let weightSum = 0;
+  order.forEach((key) => {
+    const stage = map.get(key);
+    if (!stage) {
+      return;
+    }
+    const weight = stage.total > 0 ? stage.total : 1;
+    weightSum += weight;
+    weightedTotal += stage.percentage * weight;
+  });
+
+  if (weightSum === 0) {
+    return 0;
+  }
+
+  return Math.min(100, Math.round(weightedTotal / weightSum));
+};
+
+const INITIAL_STAGE_ORDER: FetchStage[] = [
+  'assetDiscovery',
+  'fundingFetch',
+  'fundingStore',
+  'ohlcvFetch',
+  'ohlcvStore',
+];
+
+const INCREMENTAL_STAGE_ORDER: FetchStage[] = [
+  'fundingFetch',
+  'fundingStore',
+  'ohlcvFetch',
+  'ohlcvStore',
+];
+
+interface EmitStageProgressArgs {
+  type?: ProgressEvent['type'];
+  phase?: ProgressPhase;
+  stageKey: FetchStage;
+  stageOrder: FetchStage[];
+  stageMap: StageStateMap;
+  totalAssets: number;
+  processedAssets: number;
+  recordsFetched: number;
+  ohlcvRecordsFetched?: number;
+  errors: string[];
+  currentAsset?: string;
+  message?: string;
+  resampleAssetsProcessed?: number;
+  resampleRecordsCreated?: number;
 }
 
 export class DataFetcherService extends EventEmitter {
@@ -131,14 +283,14 @@ export class DataFetcherService extends EventEmitter {
 
   /**
    * Get the optimal rate limit delay for each platform
-   * Based on official API rate limits
+   * Based on official API rate limits with safety margins
    *
    * - Hyperliquid: 1200 weight/min, fundingHistory ~44 weight → 2500ms delay
-   * - Binance: 500 req / 5 min = 100 req/min → 600ms delay
-   * - Bybit: TODO - verify actual limits → 600ms default
-   * - OKX: TODO - verify actual limits → 600ms default
-   * - DyDx V4: TODO - verify actual limits → 100ms default
-   * - Aster: 100ms default
+   * - Binance: 500 req / 5 min = 100 req/min → 700ms delay (~86 req/min, 14% safety margin)
+   * - Bybit: 50 req / 2 sec = 1500 req/min → 600ms delay (very safe)
+   * - OKX: 20 req / 2 sec = 600 req/min → 600ms delay (safe)
+   * - DyDx V4: Strict OHLCV limits → 500ms delay
+   * - Aster: Unknown limits → 700ms delay for safety
    */
   private getRateLimitDelay(): number {
     const baseDelay = (() => {
@@ -146,13 +298,16 @@ export class DataFetcherService extends EventEmitter {
         case 'hyperliquid':
           return 2500; // 2.5s delay for Hyperliquid's weight-based limit
         case 'binance':
+          return 700; // 700ms = ~86 req/min, 14% safety margin under 100 req/min limit
         case 'bybit':
         case 'okx':
-          return 600; // 600ms = 100 req/min (placeholder for Bybit/OKX)
+          return 600; // 600ms = 100 req/min (very safe for both platforms)
         case 'dydx':
+          return 500; // DyDx has strict rate limits for OHLCV endpoints
         case 'aster':
+          return 700; // Conservative delay for unknown limits
         default:
-          return 100;
+          return 700;
       }
     })();
 
@@ -185,12 +340,11 @@ export class DataFetcherService extends EventEmitter {
       case 'binance':
       case 'bybit':
       case 'okx':
-        return 1;
       case 'dydx':
       case 'aster':
-        return 5;
+        return 1; // Sequential requests for all platforms with strict/unknown rate limits
       default:
-        return 2;
+        return 1; // Default to sequential for safety
     }
   }
 
@@ -247,68 +401,174 @@ export class DataFetcherService extends EventEmitter {
     return this.currentProgress;
   }
 
+  private emitStageProgress(args: EmitStageProgressArgs): void {
+    const {
+      type = 'progress',
+      phase = 'fetch',
+      stageKey,
+      stageOrder,
+      stageMap,
+      totalAssets,
+      processedAssets,
+      recordsFetched,
+      ohlcvRecordsFetched,
+      errors,
+      currentAsset,
+      message,
+      resampleAssetsProcessed,
+      resampleRecordsCreated,
+    } = args;
+
+    this.currentProgress = {
+      type,
+      phase,
+      stage: stageKey,
+      stages: cloneStageSnapshots(stageOrder, stageMap),
+      totalAssets,
+      processedAssets,
+      currentAsset,
+      recordsFetched,
+      ohlcvRecordsFetched,
+      resampleRecordsCreated,
+      resampleAssetsProcessed,
+      errors: [...errors],
+      percentage: calculateOverallPercentage(stageMap, stageOrder),
+      message,
+    };
+    this.emit('progress', this.currentProgress);
+  }
+
   private async finalizeFetchProgress(context: {
     totalAssets: number;
     assetsProcessed: number;
     recordsFetched: number;
     errors: string[];
+    ohlcvRecordsFetched?: number;
+    stageState?: {
+      order: FetchStage[];
+      map: StageStateMap;
+    };
   }): Promise<void> {
+    const stageOrder = context.stageState?.order ?? [];
+    const stageMap = context.stageState?.map;
+
+    if (stageMap) {
+      stageOrder.forEach((stageKey) => {
+        if (stageKey === 'resample' && this.platform === 'hyperliquid') {
+          return;
+        }
+        updateStage(stageMap, stageKey, { status: 'complete', percentage: 100 });
+      });
+    }
+
     if (this.platform !== 'hyperliquid') {
-      this.currentProgress = {
-        type: 'complete',
-        phase: 'fetch',
-        totalAssets: context.totalAssets,
-        processedAssets: context.assetsProcessed,
-        recordsFetched: context.recordsFetched,
-        errors: context.errors,
-        percentage: 100,
-      };
-      this.emit('progress', this.currentProgress);
+      if (stageMap && stageOrder.length > 0) {
+        this.emitStageProgress({
+          type: 'complete',
+          phase: 'fetch',
+          stageKey: stageOrder[stageOrder.length - 1],
+          stageOrder,
+          stageMap,
+          totalAssets: context.totalAssets,
+          processedAssets: context.assetsProcessed,
+          recordsFetched: context.recordsFetched,
+          ohlcvRecordsFetched: context.ohlcvRecordsFetched,
+          errors: context.errors,
+          message: 'Fetch complete',
+        });
+      } else {
+        this.currentProgress = {
+          type: 'complete',
+          phase: 'fetch',
+          stage: 'ohlcvStore',
+          stages: [],
+          totalAssets: context.totalAssets,
+          processedAssets: context.assetsProcessed,
+          recordsFetched: context.recordsFetched,
+          ohlcvRecordsFetched: context.ohlcvRecordsFetched,
+          errors: context.errors,
+          percentage: 100,
+        };
+        this.emit('progress', this.currentProgress);
+      }
       return;
     }
 
     // Hyperliquid requires an additional resampling step
-    this.currentProgress = {
+    let effectiveStageOrder = stageOrder;
+    let effectiveStageMap = stageMap;
+    if (!effectiveStageMap) {
+      effectiveStageOrder = ['resample'];
+      effectiveStageMap = initializeStageMap(effectiveStageOrder, { resample: context.totalAssets });
+    } else if (!effectiveStageOrder.includes('resample')) {
+      effectiveStageOrder = [...effectiveStageOrder, 'resample'];
+      updateStage(effectiveStageMap, 'resample', { status: 'pending', completed: 0, total: context.totalAssets });
+    }
+
+    updateStage(effectiveStageMap, 'resample', {
+      status: 'active',
+      completed: 0,
+      message: 'Generating 8-hour aggregated data...',
+    });
+
+    this.emitStageProgress({
       type: 'progress',
       phase: 'resample',
+      stageKey: 'resample',
+      stageOrder: effectiveStageOrder,
+      stageMap: effectiveStageMap,
       totalAssets: context.totalAssets,
       processedAssets: context.assetsProcessed,
       recordsFetched: context.recordsFetched,
+      ohlcvRecordsFetched: context.ohlcvRecordsFetched,
       errors: context.errors,
-      percentage: 0,
-      message: 'Generating 8-hour aggregated data...'
-    };
-    this.emit('progress', this.currentProgress);
+      message: 'Generating 8-hour aggregated data...',
+    });
 
     try {
       const { assetsProcessed, recordsCreated } = await this.resampleHyperliquidTo8h();
-      this.currentProgress = {
+      updateStage(effectiveStageMap, 'resample', {
+        status: 'complete',
+        completed: assetsProcessed,
+        total: Math.max(assetsProcessed, context.totalAssets),
+        message: 'Fetch and resampling complete',
+      });
+
+      this.emitStageProgress({
         type: 'complete',
         phase: 'resample',
+        stageKey: 'resample',
+        stageOrder: effectiveStageOrder,
+        stageMap: effectiveStageMap,
         totalAssets: context.totalAssets,
         processedAssets: context.assetsProcessed,
         recordsFetched: context.recordsFetched,
+        ohlcvRecordsFetched: context.ohlcvRecordsFetched,
+        errors: context.errors,
         resampleAssetsProcessed: assetsProcessed,
         resampleRecordsCreated: recordsCreated,
-        errors: context.errors,
-        percentage: 100,
         message: 'Fetch and resampling complete',
-      };
-      this.emit('progress', this.currentProgress);
+      });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       context.errors.push(errorMsg);
-      this.currentProgress = {
+      updateStage(effectiveStageMap, 'resample', {
+        status: 'active',
+        message: 'Resampling failed',
+      });
+      this.emitStageProgress({
         type: 'error',
         phase: 'resample',
+        stageKey: 'resample',
+        stageOrder: effectiveStageOrder,
+        stageMap: effectiveStageMap,
         totalAssets: context.totalAssets,
         processedAssets: context.assetsProcessed,
         recordsFetched: context.recordsFetched,
+        ohlcvRecordsFetched: context.ohlcvRecordsFetched,
         errors: context.errors,
-        percentage: 0,
         message: 'Resampling failed',
-      };
-      this.emit('progress', this.currentProgress);
+      });
       throw error;
     }
   }
@@ -338,6 +598,8 @@ export class DataFetcherService extends EventEmitter {
     let recordsFetched = 0;
     let ohlcvRecordsFetched = 0;
     const errors: string[] = [];
+    let stageState: { order: FetchStage[]; map: StageStateMap } | null = null;
+    let assetSymbols: string[] = [];
 
     try {
       // Step 1: Fetch and store all assets
@@ -366,51 +628,109 @@ export class DataFetcherService extends EventEmitter {
 
       // Step 2: Fetch funding history for each unique asset
       // Use unique symbols to match what we stored in the database
-      const assetSymbols = uniqueAssets.map((a) => a.symbol);
+      assetSymbols = uniqueAssets.map((a) => a.symbol);
 
-      // Build symbol → assetId map once we have the latest DB snapshot
+      // Build symbol -> assetId map once we have the latest DB snapshot
       const storedAssets = await AssetRepository.findByPlatform(this.platform);
       const assetMap = new Map(storedAssets.map((asset) => [asset.symbol, asset.id]));
 
-      // Emit start event
+      const stageOrder =
+        this.platform === 'hyperliquid' ? [...INITIAL_STAGE_ORDER, 'resample'] : [...INITIAL_STAGE_ORDER];
+      const stageTotals: Partial<Record<FetchStage, number>> = {
+        assetDiscovery: uniqueAssets.length,
+        fundingFetch: assetSymbols.length,
+        fundingStore: assetSymbols.length,
+        ohlcvFetch: assetSymbols.length,
+        ohlcvStore: assetSymbols.length,
+      };
+      if (this.platform === 'hyperliquid') {
+        stageTotals.resample = assetSymbols.length;
+      }
+      const stageMap = initializeStageMap(stageOrder, stageTotals);
+      stageState = { order: stageOrder, map: stageMap };
+
+      updateStage(stageMap, 'assetDiscovery', {
+        status: 'active',
+        completed: 0,
+        message: 'Preparing asset list...',
+      });
       logger.info(`[PROGRESS] START: 0/${assetSymbols.length} assets`);
-      this.currentProgress = {
+      this.emitStageProgress({
         type: 'start',
-        phase: 'fetch',
+        stageKey: 'assetDiscovery',
+        stageOrder,
+        stageMap,
         totalAssets: assetSymbols.length,
         processedAssets: 0,
         recordsFetched: 0,
-        errors: [],
-        percentage: 0,
-      };
-      this.emit('progress', this.currentProgress);
+        ohlcvRecordsFetched: 0,
+        errors,
+        message: 'Preparing asset list...',
+      });
+      updateStage(stageMap, 'assetDiscovery', {
+        completed: uniqueAssets.length,
+        status: 'complete',
+        message: `Stored ${uniqueAssets.length} unique assets`,
+      });
+      this.emitStageProgress({
+        stageKey: 'assetDiscovery',
+        stageOrder,
+        stageMap,
+        totalAssets: assetSymbols.length,
+        processedAssets: 0,
+        recordsFetched: 0,
+        ohlcvRecordsFetched: 0,
+        errors,
+        message: `Stored ${uniqueAssets.length} unique assets`,
+      });
+
+      updateStage(stageMap, 'fundingFetch', {
+        status: 'active',
+        message: 'Fetching funding rates...',
+      });
       const fundingDataMap = await this.platformClient.getFundingHistoryBatch(
         assetSymbols,
         this.getRateLimitDelay(), // Platform-specific rate limit delay
         this.getConcurrencyLimit(),
         (currentSymbol: string, processed: number) => {
           // Emit progress event for each asset
+          updateStage(stageMap, 'fundingFetch', {
+            completed: processed,
+            currentItem: currentSymbol,
+          });
           logger.debug('[PROGRESS] Asset fetch progress', {
             processed,
             total: assetSymbols.length,
             currentSymbol,
             percentage: Math.round((processed / assetSymbols.length) * 100),
           });
-          this.currentProgress = {
-            type: 'progress',
-            phase: 'fetch',
+          this.emitStageProgress({
+            stageKey: 'fundingFetch',
+            stageOrder,
+            stageMap,
             totalAssets: assetSymbols.length,
-            processedAssets: processed,
+            processedAssets: assetsProcessed,
             currentAsset: currentSymbol,
             recordsFetched,
+            ohlcvRecordsFetched,
             errors,
-            percentage: Math.round((processed / assetSymbols.length) * 100),
-          };
-          this.emit('progress', this.currentProgress);
+            message: 'Fetching funding rates...',
+          });
         }
       );
+      updateStage(stageMap, 'fundingFetch', {
+        completed: assetSymbols.length,
+        status: 'complete',
+        currentItem: undefined,
+        message: 'Funding rates fetched',
+      });
 
       // Step 3: Store funding rate data
+      updateStage(stageMap, 'fundingStore', {
+        status: 'active',
+        message: 'Storing funding rates...',
+      });
+      let fundingStoreProgress = 0;
       for (const [symbol, fundingData] of fundingDataMap.entries()) {
         try {
           const assetId = assetMap.get(symbol);
@@ -437,12 +757,51 @@ export class DataFetcherService extends EventEmitter {
           const errorMsg = `Failed to store funding data for ${symbol}: ${error}`;
           logger.error(errorMsg);
           errors.push(errorMsg);
+        } finally {
+          fundingStoreProgress++;
+          updateStage(stageMap, 'fundingStore', {
+            completed: fundingStoreProgress,
+            currentItem: symbol,
+          });
+          this.emitStageProgress({
+            stageKey: 'fundingStore',
+            stageOrder,
+            stageMap,
+            totalAssets: assetSymbols.length,
+            processedAssets: assetsProcessed,
+            currentAsset: symbol,
+            recordsFetched,
+            ohlcvRecordsFetched,
+            errors,
+            message: 'Storing funding rates...',
+          });
         }
       }
+      updateStage(stageMap, 'fundingStore', {
+        status: 'complete',
+        completed: assetSymbols.length,
+        currentItem: undefined,
+        message: 'Funding rates stored',
+      });
+      this.emitStageProgress({
+        stageKey: 'fundingStore',
+        stageOrder,
+        stageMap,
+        totalAssets: assetSymbols.length,
+        processedAssets: assetsProcessed,
+        recordsFetched,
+        ohlcvRecordsFetched,
+        errors,
+        message: 'Funding rates stored',
+      });
 
       // Step 4: Fetch and store OHLCV data
       logger.info(`Fetching OHLCV data for ${assetSymbols.length} assets from ${this.platform}`);
       let ohlcvAssetsProcessed = 0;
+      updateStage(stageMap, 'ohlcvFetch', {
+        status: 'active',
+        message: 'Fetching OHLCV candles...',
+      });
 
       const ohlcvDataMap = await this.platformClient.getOHLCVBatch(
         assetSymbols,
@@ -450,28 +809,43 @@ export class DataFetcherService extends EventEmitter {
         this.getRateLimitDelay(),
         this.getConcurrencyLimit(),
         (currentSymbol: string, processed: number) => {
+          updateStage(stageMap, 'ohlcvFetch', {
+            completed: processed,
+            currentItem: currentSymbol,
+          });
           logger.debug('[PROGRESS] OHLCV fetch progress', {
             processed,
             total: assetSymbols.length,
             currentSymbol,
             percentage: Math.round((processed / assetSymbols.length) * 100),
           });
-          this.currentProgress = {
-            type: 'progress',
-            phase: 'fetch',
+          this.emitStageProgress({
+            stageKey: 'ohlcvFetch',
+            stageOrder,
+            stageMap,
             totalAssets: assetSymbols.length,
             processedAssets: assetsProcessed,
             currentAsset: currentSymbol,
             recordsFetched,
             ohlcvRecordsFetched,
             errors,
-            percentage: Math.round(((assetsProcessed + processed) / (assetSymbols.length * 2)) * 100),
-          };
-          this.emit('progress', this.currentProgress);
+            message: 'Fetching OHLCV candles...',
+          });
         }
       );
+      updateStage(stageMap, 'ohlcvFetch', {
+        completed: assetSymbols.length,
+        status: 'complete',
+        currentItem: undefined,
+        message: 'OHLCV data fetched',
+      });
 
       // Step 5: Store OHLCV data
+      updateStage(stageMap, 'ohlcvStore', {
+        status: 'active',
+        message: 'Storing OHLCV candles...',
+      });
+      let ohlcvStoreProgress = 0;
       for (const [symbol, ohlcvData] of ohlcvDataMap.entries()) {
         try {
           const assetId = assetMap.get(symbol);
@@ -503,8 +877,43 @@ export class DataFetcherService extends EventEmitter {
           const errorMsg = `Failed to store OHLCV data for ${symbol}: ${error}`;
           logger.error(errorMsg);
           errors.push(errorMsg);
+        } finally {
+          ohlcvStoreProgress++;
+          updateStage(stageMap, 'ohlcvStore', {
+            completed: ohlcvStoreProgress,
+            currentItem: symbol,
+          });
+          this.emitStageProgress({
+            stageKey: 'ohlcvStore',
+            stageOrder,
+            stageMap,
+            totalAssets: assetSymbols.length,
+            processedAssets: assetsProcessed,
+            currentAsset: symbol,
+            recordsFetched,
+            ohlcvRecordsFetched,
+            errors,
+            message: 'Storing OHLCV candles...',
+          });
         }
       }
+      updateStage(stageMap, 'ohlcvStore', {
+        status: 'complete',
+        completed: assetSymbols.length,
+        currentItem: undefined,
+        message: 'OHLCV data stored',
+      });
+      this.emitStageProgress({
+        stageKey: 'ohlcvStore',
+        stageOrder,
+        stageMap,
+        totalAssets: assetSymbols.length,
+        processedAssets: assetsProcessed,
+        recordsFetched,
+        ohlcvRecordsFetched,
+        errors,
+        message: 'OHLCV data stored',
+      });
 
       // Update fetch log
       const status = errors.length === 0 ? 'success' : errors.length < assets.length ? 'partial' : 'failed';
@@ -526,7 +935,9 @@ export class DataFetcherService extends EventEmitter {
         totalAssets: assets.length,
         assetsProcessed,
         recordsFetched,
+        ohlcvRecordsFetched,
         errors,
+        stageState: stageState ?? undefined,
       });
 
       return { assetsProcessed, recordsFetched, ohlcvRecordsFetched, errors };
@@ -536,16 +947,36 @@ export class DataFetcherService extends EventEmitter {
 
       // Emit error event
       if (this.currentProgress?.type !== 'error') {
-        this.currentProgress = {
-          type: 'error',
-          phase: 'fetch',
-          totalAssets: 0,
-          processedAssets: assetsProcessed,
-          recordsFetched,
-          errors: [...errors, errorMsg],
-          percentage: 0,
-        };
-        this.emit('progress', this.currentProgress);
+        const allErrors = [...errors, errorMsg];
+        if (stageState) {
+          const stageKey = this.currentProgress?.stage ?? stageState.order[0] ?? 'fundingFetch';
+          this.emitStageProgress({
+            type: 'error',
+            stageKey,
+            stageOrder: stageState.order,
+            stageMap: stageState.map,
+            totalAssets: assetSymbols.length,
+            processedAssets: assetsProcessed,
+            recordsFetched,
+            ohlcvRecordsFetched,
+            errors: allErrors,
+            message: errorMsg,
+          });
+        } else {
+          this.currentProgress = {
+            type: 'error',
+            phase: 'fetch',
+            stage: 'fundingFetch',
+            stages: [],
+            totalAssets: assetSymbols.length,
+            processedAssets: assetsProcessed,
+            recordsFetched,
+            errors: allErrors,
+            percentage: 0,
+            message: errorMsg,
+          };
+          this.emit('progress', this.currentProgress);
+        }
       }
 
       await FetchLogRepository.complete(
@@ -588,10 +1019,13 @@ export class DataFetcherService extends EventEmitter {
     let recordsFetched = 0;
     let ohlcvRecordsFetched = 0;
     const errors: string[] = [];
+    let stageState: { order: FetchStage[]; map: StageStateMap } | null = null;
+    let totalAssetsTarget = 0;
 
     try {
       // Get all active assets
       const assets = await AssetRepository.findByPlatform(this.platform);
+      totalAssetsTarget = assets.length;
 
       if (assets.length === 0) {
         logger.warn('No assets found. Run initial fetch first.');
@@ -599,18 +1033,40 @@ export class DataFetcherService extends EventEmitter {
         return { assetsProcessed: 0, recordsFetched: 0, ohlcvRecordsFetched: 0, errors: ['No assets found'] };
       }
 
+      const stageOrder =
+        this.platform === 'hyperliquid'
+          ? [...INCREMENTAL_STAGE_ORDER, 'resample']
+          : [...INCREMENTAL_STAGE_ORDER];
+      const stageTotals: Partial<Record<FetchStage, number>> = {
+        fundingFetch: assets.length,
+        fundingStore: assets.length,
+        ohlcvFetch: assets.length,
+        ohlcvStore: assets.length,
+      };
+      if (this.platform === 'hyperliquid') {
+        stageTotals.resample = assets.length;
+      }
+      const stageMap = initializeStageMap(stageOrder, stageTotals);
+      stageState = { order: stageOrder, map: stageMap };
+
       // Emit start event
       logger.info(`[PROGRESS] INCREMENTAL START: 0/${assets.length} assets`);
-      this.currentProgress = {
+      updateStage(stageMap, 'fundingFetch', {
+        status: 'active',
+        message: 'Fetching funding updates...',
+      });
+      this.emitStageProgress({
         type: 'start',
-        phase: 'fetch',
+        stageKey: 'fundingFetch',
+        stageOrder,
+        stageMap,
         totalAssets: assets.length,
         processedAssets: 0,
         recordsFetched: 0,
-        errors: [],
-        percentage: 0,
-      };
-      this.emit('progress', this.currentProgress);
+        ohlcvRecordsFetched: 0,
+        errors,
+        message: 'Fetching funding updates...',
+      });
 
       // Fetch funding history for each asset
       const assetSymbols = assets.map((a) => a.symbol);
@@ -620,25 +1076,36 @@ export class DataFetcherService extends EventEmitter {
         this.getConcurrencyLimit(),
         (currentSymbol: string, processed: number) => {
           // Emit progress event for each asset
+          updateStage(stageMap, 'fundingFetch', {
+            completed: processed,
+            currentItem: currentSymbol,
+          });
           logger.debug('[PROGRESS] Incremental fetch progress', {
             processed,
             total: assets.length,
             currentSymbol,
             percentage: Math.round((processed / assets.length) * 100),
           });
-          this.currentProgress = {
-            type: 'progress',
-            phase: 'fetch',
+          this.emitStageProgress({
+            stageKey: 'fundingFetch',
+            stageOrder,
+            stageMap,
             totalAssets: assets.length,
-            processedAssets: processed,
+            processedAssets: assetsProcessed,
             currentAsset: currentSymbol,
             recordsFetched,
+            ohlcvRecordsFetched,
             errors,
-            percentage: Math.round((processed / assets.length) * 100),
-          };
-          this.emit('progress', this.currentProgress);
+            message: 'Fetching funding updates...',
+          });
         }
       );
+      updateStage(stageMap, 'fundingFetch', {
+        completed: assets.length,
+        status: 'complete',
+        currentItem: undefined,
+        message: 'Funding data fetched',
+      });
 
       const latestTimestampMap = await FundingRateRepository.getLatestTimestamps(
         assets.map((asset) => asset.id),
@@ -647,6 +1114,11 @@ export class DataFetcherService extends EventEmitter {
       );
 
       // Store only new records
+      updateStage(stageMap, 'fundingStore', {
+        status: 'active',
+        message: 'Storing funding updates...',
+      });
+      let fundingStoreProgress = 0;
       for (const asset of assets) {
         try {
           const fundingData = fundingDataMap.get(asset.symbol) || [];
@@ -686,39 +1158,87 @@ export class DataFetcherService extends EventEmitter {
           const errorMsg = `Failed to process funding rate for ${asset.symbol}: ${error}`;
           logger.error(errorMsg);
           errors.push(errorMsg);
+        } finally {
+          fundingStoreProgress++;
+          updateStage(stageMap, 'fundingStore', {
+            completed: fundingStoreProgress,
+            currentItem: asset.symbol,
+          });
+          this.emitStageProgress({
+            stageKey: 'fundingStore',
+            stageOrder,
+            stageMap,
+            totalAssets: assets.length,
+            processedAssets: assetsProcessed,
+            currentAsset: asset.symbol,
+            recordsFetched,
+            ohlcvRecordsFetched,
+            errors,
+            message: 'Storing funding updates...',
+          });
         }
       }
+      updateStage(stageMap, 'fundingStore', {
+        completed: assets.length,
+        status: 'complete',
+        currentItem: undefined,
+        message: 'Funding updates stored',
+      });
+      this.emitStageProgress({
+        stageKey: 'fundingStore',
+        stageOrder,
+        stageMap,
+        totalAssets: assets.length,
+        processedAssets: assetsProcessed,
+        recordsFetched,
+        ohlcvRecordsFetched,
+        errors,
+        message: 'Funding updates stored',
+      });
 
       // Fetch and store OHLCV data
       logger.info(`Fetching OHLCV data for ${assets.length} assets from ${this.platform}`);
       let ohlcvAssetsProcessed = 0;
-
+      updateStage(stageMap, 'ohlcvFetch', {
+        status: 'active',
+        message: 'Fetching OHLCV updates...',
+      });
       const ohlcvDataMap = await this.platformClient.getOHLCVBatch(
         assetSymbols,
         this.getOHLCVInterval(),
         this.getRateLimitDelay(),
         this.getConcurrencyLimit(),
         (currentSymbol: string, processed: number) => {
+          updateStage(stageMap, 'ohlcvFetch', {
+            completed: processed,
+            currentItem: currentSymbol,
+          });
           logger.debug('[PROGRESS] OHLCV incremental fetch progress', {
             processed,
             total: assets.length,
             currentSymbol,
             percentage: Math.round((processed / assets.length) * 100),
           });
-          this.currentProgress = {
-            type: 'progress',
-            phase: 'fetch',
+          this.emitStageProgress({
+            stageKey: 'ohlcvFetch',
+            stageOrder,
+            stageMap,
             totalAssets: assets.length,
             processedAssets: assetsProcessed,
             currentAsset: currentSymbol,
             recordsFetched,
             ohlcvRecordsFetched,
             errors,
-            percentage: Math.round(((assetsProcessed + processed) / (assets.length * 2)) * 100),
-          };
-          this.emit('progress', this.currentProgress);
+            message: 'Fetching OHLCV updates...',
+          });
         }
       );
+      updateStage(stageMap, 'ohlcvFetch', {
+        completed: assets.length,
+        status: 'complete',
+        currentItem: undefined,
+        message: 'OHLCV updates fetched',
+      });
 
       const latestOHLCVTimestampMap = await OHLCVRepository.getLatestTimestamps(
         assets.map((asset) => asset.id),
@@ -727,6 +1247,11 @@ export class DataFetcherService extends EventEmitter {
       );
 
       // Store only new OHLCV records
+      updateStage(stageMap, 'ohlcvStore', {
+        status: 'active',
+        message: 'Storing OHLCV updates...',
+      });
+      let ohlcvStoreProgress = 0;
       for (const asset of assets) {
         try {
           const ohlcvData = ohlcvDataMap.get(asset.symbol) || [];
@@ -771,8 +1296,43 @@ export class DataFetcherService extends EventEmitter {
           const errorMsg = `Failed to process OHLCV for ${asset.symbol}: ${error}`;
           logger.error(errorMsg);
           errors.push(errorMsg);
+        } finally {
+          ohlcvStoreProgress++;
+          updateStage(stageMap, 'ohlcvStore', {
+            completed: ohlcvStoreProgress,
+            currentItem: asset.symbol,
+          });
+          this.emitStageProgress({
+            stageKey: 'ohlcvStore',
+            stageOrder,
+            stageMap,
+            totalAssets: assets.length,
+            processedAssets: assetsProcessed,
+            currentAsset: asset.symbol,
+            recordsFetched,
+            ohlcvRecordsFetched,
+            errors,
+            message: 'Storing OHLCV updates...',
+          });
         }
       }
+      updateStage(stageMap, 'ohlcvStore', {
+        completed: assets.length,
+        status: 'complete',
+        currentItem: undefined,
+        message: 'OHLCV updates stored',
+      });
+      this.emitStageProgress({
+        stageKey: 'ohlcvStore',
+        stageOrder,
+        stageMap,
+        totalAssets: assets.length,
+        processedAssets: assetsProcessed,
+        recordsFetched,
+        ohlcvRecordsFetched,
+        errors,
+        message: 'OHLCV updates stored',
+      });
 
       // Update fetch log
       const status = errors.length === 0 ? 'success' : 'partial';
@@ -796,7 +1356,9 @@ export class DataFetcherService extends EventEmitter {
         totalAssets: assets.length,
         assetsProcessed,
         recordsFetched,
+        ohlcvRecordsFetched,
         errors,
+        stageState: stageState ?? undefined,
       });
 
       return { assetsProcessed, recordsFetched, ohlcvRecordsFetched, errors };
@@ -806,16 +1368,36 @@ export class DataFetcherService extends EventEmitter {
 
       // Emit error event
       if (this.currentProgress?.type !== 'error') {
-        this.currentProgress = {
-          type: 'error',
-          phase: 'fetch',
-          totalAssets: 0,
-          processedAssets: assetsProcessed,
-          recordsFetched,
-          errors: [...errors, errorMsg],
-          percentage: 0,
-        };
-        this.emit('progress', this.currentProgress);
+        const allErrors = [...errors, errorMsg];
+        if (stageState) {
+          const stageKey = this.currentProgress?.stage ?? stageState.order[0] ?? 'fundingFetch';
+          this.emitStageProgress({
+            type: 'error',
+            stageKey,
+            stageOrder: stageState.order,
+            stageMap: stageState.map,
+            totalAssets: totalAssetsTarget,
+            processedAssets: assetsProcessed,
+            recordsFetched,
+            ohlcvRecordsFetched,
+            errors: allErrors,
+            message: errorMsg,
+          });
+        } else {
+          this.currentProgress = {
+            type: 'error',
+            phase: 'fetch',
+            stage: 'fundingFetch',
+            stages: [],
+            totalAssets: totalAssetsTarget,
+            processedAssets: assetsProcessed,
+            recordsFetched,
+            errors: allErrors,
+            percentage: 0,
+            message: errorMsg,
+          };
+          this.emit('progress', this.currentProgress);
+        }
       }
 
       await FetchLogRepository.complete(
@@ -905,3 +1487,4 @@ export class DataFetcherService extends EventEmitter {
     };
   }
 }
+

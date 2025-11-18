@@ -2,7 +2,43 @@ import express from 'express';
 import request from 'supertest';
 import { EventEmitter } from 'events';
 import createProgressStream from './createProgressStream';
-import { ProgressEvent, DataFetcherService } from '../services/dataFetcher';
+import { ProgressEvent, ProgressStageSnapshot, DataFetcherService } from '../services/dataFetcher';
+
+const buildProgressEvent = (overrides: Partial<ProgressEvent> = {}): ProgressEvent => {
+  const total = overrides.totalAssets ?? 10;
+  const processed = overrides.processedAssets ?? 0;
+  const stageKey = overrides.stage ?? 'fundingFetch';
+  const stageSnapshots: ProgressStageSnapshot[] =
+    overrides.stages ?? [
+      {
+        key: stageKey,
+        label: 'Fetch funding rates',
+        status: processed >= total ? 'complete' : 'active',
+        completed: processed,
+        total,
+        percentage: total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0,
+      },
+    ];
+
+  return {
+    type: 'progress',
+    phase: 'fetch',
+    stage: stageKey,
+    stages: stageSnapshots,
+    totalAssets: total,
+    processedAssets: processed,
+    currentAsset: overrides.currentAsset,
+    recordsFetched: overrides.recordsFetched ?? processed,
+    ohlcvRecordsFetched: overrides.ohlcvRecordsFetched,
+    resampleRecordsCreated: overrides.resampleRecordsCreated,
+    resampleAssetsProcessed: overrides.resampleAssetsProcessed,
+    errors: overrides.errors ?? [],
+    percentage:
+      overrides.percentage ?? (total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0),
+    message: overrides.message,
+    ...overrides,
+  };
+};
 
 class FakeFetcher extends EventEmitter {
   private inProgress = false;
@@ -19,26 +55,25 @@ class FakeFetcher extends EventEmitter {
     if (!this.autoEmit) {
       return;
     }
-    this.pushProgress({
-      type: 'progress',
-      phase: 'fetch',
-      totalAssets: 10,
-      processedAssets: 5,
-      currentAsset: 'BTC',
-      recordsFetched: 5,
-      errors: [],
-      percentage: 50,
-    });
-    this.pushProgress({
-      type: 'complete',
-      phase: 'fetch',
-      totalAssets: 10,
-      processedAssets: 10,
-      currentAsset: 'ETH',
-      recordsFetched: 10,
-      errors: [],
-      percentage: 100,
-    });
+    this.pushProgress(
+      buildProgressEvent({
+        type: 'progress',
+        totalAssets: 10,
+        processedAssets: 5,
+        currentAsset: 'BTC',
+        recordsFetched: 5,
+      })
+    );
+    this.pushProgress(
+      buildProgressEvent({
+        type: 'complete',
+        totalAssets: 10,
+        processedAssets: 10,
+        currentAsset: 'ETH',
+        recordsFetched: 10,
+        percentage: 100,
+      })
+    );
   });
 
   fetchIncrementalData = jest.fn(async () => this.fetchInitialData());
@@ -123,29 +158,28 @@ describe('createProgressStream', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    fetcher.pushProgress({
-      type: 'progress',
-      phase: 'fetch',
-      totalAssets: 4,
-      processedAssets: 2,
-      currentAsset: 'SOL',
-      recordsFetched: 2,
-      errors: [],
-      percentage: 50,
-    });
+    fetcher.pushProgress(
+      buildProgressEvent({
+        totalAssets: 4,
+        processedAssets: 2,
+        currentAsset: 'SOL',
+        recordsFetched: 2,
+        percentage: 50,
+      })
+    );
 
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    fetcher.pushProgress({
-      type: 'complete',
-      phase: 'fetch',
-      totalAssets: 4,
-      processedAssets: 4,
-      currentAsset: 'SOL',
-      recordsFetched: 4,
-      errors: [],
-      percentage: 100,
-    });
+    fetcher.pushProgress(
+      buildProgressEvent({
+        type: 'complete',
+        totalAssets: 4,
+        processedAssets: 4,
+        currentAsset: 'SOL',
+        recordsFetched: 4,
+        percentage: 100,
+      })
+    );
 
     const response = await responsePromise;
 

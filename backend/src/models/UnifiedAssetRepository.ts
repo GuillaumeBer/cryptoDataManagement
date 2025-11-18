@@ -83,17 +83,20 @@ export class UnifiedAssetRepository {
    * Create a new unified asset
    */
   async create(params: CreateUnifiedAssetParams): Promise<UnifiedAsset> {
-    const { normalized_symbol, display_name, description } = params;
+    const { normalized_symbol, display_name, description, coingecko_id, coingecko_name, coingecko_symbol } = params;
 
     const result = await query<UnifiedAsset>(
-      `INSERT INTO unified_assets (normalized_symbol, display_name, description)
-       VALUES ($1, $2, $3)
+      `INSERT INTO unified_assets (normalized_symbol, display_name, description, coingecko_id, coingecko_name, coingecko_symbol)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (normalized_symbol) DO UPDATE
        SET display_name = COALESCE(EXCLUDED.display_name, unified_assets.display_name),
            description = COALESCE(EXCLUDED.description, unified_assets.description),
+           coingecko_id = COALESCE(EXCLUDED.coingecko_id, unified_assets.coingecko_id),
+           coingecko_name = COALESCE(EXCLUDED.coingecko_name, unified_assets.coingecko_name),
+           coingecko_symbol = COALESCE(EXCLUDED.coingecko_symbol, unified_assets.coingecko_symbol),
            updated_at = NOW()
        RETURNING *`,
-      [normalized_symbol, display_name || null, description || null]
+      [normalized_symbol, display_name || null, description || null, coingecko_id || null, coingecko_name || null, coingecko_symbol || null]
     );
 
     logger.info(`Unified asset created/updated: ${normalized_symbol}`);
@@ -161,6 +164,47 @@ export class UnifiedAssetRepository {
     );
 
     return parseInt(result.rows[0].count);
+  }
+
+  /**
+   * Get unified assets available on at least minPlatforms platforms
+   */
+  async findMultiPlatformAssets(
+    minPlatforms: number = 3
+  ): Promise<Array<UnifiedAsset & {
+    platform_count: number;
+    platforms: string[];
+    avg_confidence: number;
+    avg_correlation: number | null;
+  }>> {
+    const result = await query<any>(
+      `SELECT
+        ua.id,
+        ua.normalized_symbol,
+        ua.display_name,
+        ua.description,
+        ua.coingecko_id,
+        ua.coingecko_name,
+        ua.coingecko_symbol,
+        ua.created_at,
+        ua.updated_at,
+        COUNT(DISTINCT a.platform)::integer as platform_count,
+        ARRAY_AGG(DISTINCT a.platform ORDER BY a.platform) as platforms,
+        ROUND(AVG(am.confidence_score))::integer as avg_confidence,
+        AVG(CAST(am.price_correlation AS DECIMAL)) as avg_correlation
+      FROM unified_assets ua
+      JOIN asset_mappings am ON ua.id = am.unified_asset_id
+      JOIN assets a ON am.asset_id = a.id
+      WHERE a.is_active = true
+      GROUP BY ua.id, ua.normalized_symbol, ua.display_name, ua.description,
+               ua.coingecko_id, ua.coingecko_name, ua.coingecko_symbol,
+               ua.created_at, ua.updated_at
+      HAVING COUNT(DISTINCT a.platform) >= $1
+      ORDER BY platform_count DESC, ua.normalized_symbol ASC`,
+      [minPlatforms]
+    );
+
+    return result.rows;
   }
 }
 

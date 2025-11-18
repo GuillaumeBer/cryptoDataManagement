@@ -132,13 +132,12 @@ export class BinanceClient {
    * - Equivalent to ~100 requests per minute
    *
    * Default Strategy:
-   * - 500ms delay = 120 requests/min (slightly above limit)
-   * - Recommended: Adjust to 600ms (100 req/min) for strict compliance
-   * - Current 500ms is acceptable for moderate use (allows bursts, averages below limit)
+   * - 700ms delay = ~86 requests/min to provide 14% safety margin
+   * - This ensures we never hit the 100 req/min limit even with slight timing variations
    */
   async getFundingHistoryBatch(
     symbols: string[],
-    delayMs: number = 600, // Adjusted to 600ms = 100 req/min to respect rate limit
+    delayMs: number = 700, // 700ms = ~86 req/min, providing 14% safety margin under 100 req/min limit
     concurrency: number = 1,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FetchedFundingData[]>> {
@@ -248,12 +247,12 @@ export class BinanceClient {
    * - Much higher limit than funding rate endpoint
    *
    * Default Strategy:
-   * - 600ms delay = 100 requests/min for safety
+   * - 700ms delay = ~86 requests/min for consistency with funding rate endpoint
    */
   async getOHLCVBatch(
     symbols: string[],
     interval: string = '1h',
-    delayMs: number = 600,
+    delayMs: number = 700,
     concurrency: number = 1,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, FetchedOHLCVData[]>> {

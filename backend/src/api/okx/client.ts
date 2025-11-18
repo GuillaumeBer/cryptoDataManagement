@@ -307,20 +307,22 @@ export class OKXClient {
 
       // Calculate time range: 480 hours ago to match funding rate depth
       const hoursAgo = 480;
-      const after = Date.now() - (hoursAgo * 60 * 60 * 1000);
-      const before = Date.now();
+      const targetStart = Date.now() - hoursAgo * 60 * 60 * 1000;
 
-      // OKX limits to 100 candles per request, need to fetch in batches
+      // OKX limits to 100 candles per request, need to fetch in batches.
+      // Only the "after" cursor should be used - combining it with "before" results
+      // in empty responses. We walk backwards from now until we reach the target window.
       const allResults: FetchedOHLCVData[] = [];
-      let currentAfter = after;
+      let currentAfter = Date.now();
+      let safetyCounter = 0;
+      const maxBatches = 20; // 20 * 100 candles = 2,000 hours of history buffer
 
-      while (currentAfter < before) {
+      while (currentAfter > targetStart && safetyCounter < maxBatches) {
         const response = await this.client.get<OKXKlineResponse>('/api/v5/market/history-candles', {
           params: {
             instId: symbol,
             bar,
             after: currentAfter.toString(),
-            before: before.toString(),
             limit: '100',
           },
         });
@@ -335,28 +337,39 @@ export class OKXClient {
           break; // No more data
         }
 
-        const results: FetchedOHLCVData[] = candles.map((candle) => ({
-          asset: symbol,
-          timestamp: new Date(parseInt(candle[0])),
-          open: candle[1],
-          high: candle[2],
-          low: candle[3],
-          close: candle[4],
-          volume: candle[5],
-          quoteVolume: candle[7],
-          tradesCount: 0, // OKX doesn't provide trade count in candle data
-        }));
+        const batchResults: FetchedOHLCVData[] = candles
+          .map((candle) => ({
+            asset: symbol,
+            timestamp: new Date(parseInt(candle[0], 10)),
+            open: candle[1],
+            high: candle[2],
+            low: candle[3],
+            close: candle[4],
+            volume: candle[5],
+            quoteVolume: candle[7],
+            tradesCount: 0, // OKX doesn't provide trade count in candle data
+          }))
+          .filter((record) => record.timestamp.getTime() >= targetStart);
 
-        allResults.push(...results);
+        allResults.push(...batchResults);
 
-        // Update currentAfter to the timestamp of the last candle
-        const lastTimestamp = parseInt(candles[candles.length - 1][0]);
-        currentAfter = lastTimestamp + 1;
+        const oldestTimestamp = parseInt(candles[candles.length - 1][0], 10);
+        const exhaustedBatch = candles.length < 100;
+
+        if (oldestTimestamp <= targetStart || exhaustedBatch) {
+          break;
+        }
+
+        if (oldestTimestamp >= currentAfter) {
+          logger.warn(`Detected non-decreasing pagination while fetching OKX OHLCV for ${symbol}`);
+          break;
+        }
+
+        currentAfter = oldestTimestamp - 1;
+        safetyCounter += 1;
 
         // Small delay between pagination requests
-        if (currentAfter < before) {
-          await new Promise(resolve => setTimeout(resolve, 200));
-        }
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
 
       logger.debug(`Fetched ${allResults.length} OHLCV records for ${symbol}`);
