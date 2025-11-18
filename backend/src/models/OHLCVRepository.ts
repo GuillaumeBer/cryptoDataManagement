@@ -100,7 +100,7 @@ export class OHLCVRepository {
    * Query OHLCV data with filters
    */
   async find(params: OHLCVQuery): Promise<OHLCVDataWithAsset[]> {
-    const { asset, startDate, endDate, platform, timeframe, limit = 1000, offset = 0 } = params;
+    const { asset, assetId, startDate, endDate, platform, timeframe, limit = 1000, offset = 0 } = params;
 
     const conditions: string[] = [];
     const values: any[] = [];
@@ -109,6 +109,11 @@ export class OHLCVRepository {
     if (asset) {
       conditions.push(`a.symbol = $${paramIndex++}`);
       values.push(asset);
+    }
+
+    if (assetId) {
+      conditions.push(`o.asset_id = $${paramIndex++}`);
+      values.push(assetId);
     }
 
     if (platform) {

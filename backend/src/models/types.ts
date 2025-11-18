@@ -95,6 +95,7 @@ export interface CreateOHLCVParams {
 
 export interface OHLCVQuery {
   asset?: string;
+  assetId?: number; // Query by asset ID directly
   startDate?: Date;
   endDate?: Date;
   platform?: string;
