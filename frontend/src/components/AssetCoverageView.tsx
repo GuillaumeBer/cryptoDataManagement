@@ -6,6 +6,24 @@ import { useUnifiedAssets } from '../hooks/useUnifiedAssets';
 const platformNames = Object.fromEntries(PLATFORMS.map((platform) => [platform.id, platform.name]));
 const totalEnabledPlatforms = PLATFORMS.filter((platform) => platform.enabled).length || PLATFORMS.length;
 
+function formatMarketCap(marketCap: number | null): string {
+  if (!marketCap) return 'N/A';
+
+  const trillion = 1_000_000_000_000;
+  const billion = 1_000_000_000;
+  const million = 1_000_000;
+
+  if (marketCap >= trillion) {
+    return `$${(marketCap / trillion).toFixed(2)}T`;
+  } else if (marketCap >= billion) {
+    return `$${(marketCap / billion).toFixed(2)}B`;
+  } else if (marketCap >= million) {
+    return `$${(marketCap / million).toFixed(2)}M`;
+  } else {
+    return `$${marketCap.toLocaleString()}`;
+  }
+}
+
 export default function AssetCoverageView() {
   const [searchTerm, setSearchTerm] = useState('');
   const { assets, isLoading, error } = useUnifiedAssets({ minPlatforms: 2 });
@@ -77,6 +95,7 @@ export default function AssetCoverageView() {
                 <tr>
                   <th className="px-4 py-2">Asset</th>
                   <th className="px-4 py-2">Symbol</th>
+                  <th className="px-4 py-2">Market Cap</th>
                   <th className="px-4 py-2">Platforms</th>
                   <th className="px-4 py-2">Coverage</th>
                   <th className="px-4 py-2">Confidence</th>
@@ -102,6 +121,11 @@ export default function AssetCoverageView() {
                       <td className="px-4 py-3">
                         <span className="font-mono text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">
                           {asset.normalized_symbol}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`font-semibold ${asset.market_cap_usd ? 'text-gray-900' : 'text-gray-400'}`}>
+                          {formatMarketCap(asset.market_cap_usd)}
                         </span>
                       </td>
                       <td className="px-4 py-3">
