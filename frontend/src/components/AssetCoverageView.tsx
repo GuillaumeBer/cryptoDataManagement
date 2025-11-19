@@ -6,6 +6,9 @@ import { useUnifiedAssets } from '../hooks/useUnifiedAssets';
 const platformNames = Object.fromEntries(PLATFORMS.map((platform) => [platform.id, platform.name]));
 const totalEnabledPlatforms = PLATFORMS.filter((platform) => platform.enabled).length || PLATFORMS.length;
 
+type SortField = 'asset' | 'symbol' | 'marketCap' | 'rank';
+type SortDirection = 'asc' | 'desc';
+
 function formatMarketCap(marketCap: number | null): string {
   if (!marketCap) return 'N/A';
 
@@ -26,17 +29,71 @@ function formatMarketCap(marketCap: number | null): string {
 
 export default function AssetCoverageView() {
   const [searchTerm, setSearchTerm] = useState('');
+  const [sortField, setSortField] = useState<SortField>('marketCap');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const { assets, isLoading, error } = useUnifiedAssets({ minPlatforms: 2 });
 
-  const filteredAssets = useMemo(() => {
-    if (!searchTerm) return assets;
-    const searchLower = searchTerm.toLowerCase();
-    return assets.filter((asset) =>
-      asset.normalized_symbol.toLowerCase().includes(searchLower) ||
-      asset.display_name?.toLowerCase().includes(searchLower) ||
-      asset.coingecko_name?.toLowerCase().includes(searchLower)
-    );
-  }, [assets, searchTerm]);
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // Toggle direction if clicking the same field
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      // Set new field with default direction
+      setSortField(field);
+      // Market cap defaults to desc (highest first), rank defaults to asc (lowest number = highest rank)
+      setSortDirection(field === 'marketCap' ? 'desc' : field === 'rank' ? 'asc' : 'asc');
+    }
+  };
+
+  const filteredAndSortedAssets = useMemo(() => {
+    let filtered = assets;
+
+    // Apply search filter
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase();
+      filtered = assets.filter((asset) =>
+        asset.normalized_symbol.toLowerCase().includes(searchLower) ||
+        asset.display_name?.toLowerCase().includes(searchLower) ||
+        asset.coingecko_name?.toLowerCase().includes(searchLower)
+      );
+    }
+
+    // Apply sorting
+    const sorted = [...filtered].sort((a, b) => {
+      let comparison = 0;
+
+      switch (sortField) {
+        case 'asset': {
+          const aName = (a.display_name || a.coingecko_name || a.normalized_symbol).toLowerCase();
+          const bName = (b.display_name || b.coingecko_name || b.normalized_symbol).toLowerCase();
+          comparison = aName.localeCompare(bName);
+          break;
+        }
+        case 'symbol': {
+          comparison = a.normalized_symbol.localeCompare(b.normalized_symbol);
+          break;
+        }
+        case 'marketCap': {
+          const aMarketCap = a.market_cap_usd ?? 0;
+          const bMarketCap = b.market_cap_usd ?? 0;
+          comparison = aMarketCap - bMarketCap;
+          break;
+        }
+        case 'rank': {
+          // Lower rank number = better (e.g. #1 is best)
+          // Treat null as infinity (worst rank)
+          const aRank = a.market_cap_rank ?? Infinity;
+          const bRank = b.market_cap_rank ?? Infinity;
+          comparison = aRank - bRank;
+          break;
+        }
+      }
+
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+
+    return sorted;
+  }, [assets, searchTerm, sortField, sortDirection]);
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 h-full flex flex-col">
@@ -69,7 +126,7 @@ export default function AssetCoverageView() {
           className="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         <p className="text-xs text-gray-500 mt-2">
-          Showing {filteredAssets.length} of {assets.length} multi-platform assets
+          Showing {filteredAndSortedAssets.length} of {assets.length} multi-platform assets
         </p>
       </div>
 
@@ -82,7 +139,7 @@ export default function AssetCoverageView() {
           <div className="h-full flex items-center justify-center">
             <p className="text-sm text-red-600">Unable to load assets: {error.message}</p>
           </div>
-        ) : filteredAssets.length === 0 ? (
+        ) : filteredAndSortedAssets.length === 0 ? (
           <div className="h-full flex items-center justify-center">
             <p className="text-sm text-gray-500">
               {searchTerm ? `No assets match "${searchTerm}"` : 'No multi-platform assets found'}
@@ -91,18 +148,63 @@ export default function AssetCoverageView() {
         ) : (
           <div className="max-h-80 overflow-y-auto border border-gray-100 rounded-lg">
             <table className="min-w-full divide-y divide-gray-100 text-sm">
-              <thead className="bg-gray-50 text-left text-xs font-semibold text-gray-500">
+              <thead className="bg-gray-50 text-left text-xs font-semibold text-gray-500 sticky top-0 z-10">
                 <tr>
-                  <th className="px-4 py-2">Asset</th>
-                  <th className="px-4 py-2">Symbol</th>
-                  <th className="px-4 py-2">Market Cap</th>
+                  <th
+                    className="px-4 py-2 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                    onClick={() => handleSort('rank')}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Rank</span>
+                      <span className="flex flex-col leading-none">
+                        <span className={sortField === 'rank' && sortDirection === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'}>↑</span>
+                        <span className={sortField === 'rank' && sortDirection === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'}>↓</span>
+                      </span>
+                    </div>
+                  </th>
+                  <th
+                    className="px-4 py-2 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                    onClick={() => handleSort('asset')}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Asset</span>
+                      <span className="flex flex-col leading-none">
+                        <span className={sortField === 'asset' && sortDirection === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'}>↑</span>
+                        <span className={sortField === 'asset' && sortDirection === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'}>↓</span>
+                      </span>
+                    </div>
+                  </th>
+                  <th
+                    className="px-4 py-2 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                    onClick={() => handleSort('symbol')}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Symbol</span>
+                      <span className="flex flex-col leading-none">
+                        <span className={sortField === 'symbol' && sortDirection === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'}>↑</span>
+                        <span className={sortField === 'symbol' && sortDirection === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'}>↓</span>
+                      </span>
+                    </div>
+                  </th>
+                  <th
+                    className="px-4 py-2 cursor-pointer hover:bg-gray-100 transition-colors select-none"
+                    onClick={() => handleSort('marketCap')}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Market Cap</span>
+                      <span className="flex flex-col leading-none">
+                        <span className={sortField === 'marketCap' && sortDirection === 'asc' ? 'text-blue-600 font-bold' : 'text-gray-300'}>↑</span>
+                        <span className={sortField === 'marketCap' && sortDirection === 'desc' ? 'text-blue-600 font-bold' : 'text-gray-300'}>↓</span>
+                      </span>
+                    </div>
+                  </th>
                   <th className="px-4 py-2">Platforms</th>
                   <th className="px-4 py-2">Coverage</th>
                   <th className="px-4 py-2">Confidence</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filteredAssets.map((asset) => {
+                {filteredAndSortedAssets.map((asset) => {
                   const displayName = asset.display_name || asset.coingecko_name || asset.normalized_symbol;
                   const coveragePercent = Math.round((asset.platform_count / totalEnabledPlatforms) * 100);
                   const correlationValue = asset.avg_correlation ? Number(asset.avg_correlation) : null;
@@ -110,6 +212,15 @@ export default function AssetCoverageView() {
 
                   return (
                     <tr key={asset.id}>
+                      <td className="px-4 py-3">
+                        {asset.market_cap_rank ? (
+                          <span className="font-semibold text-blue-600">
+                            #{asset.market_cap_rank}
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-sm">N/A</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <div>
                           <p className="font-semibold text-gray-900">{displayName}</p>

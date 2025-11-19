@@ -52,6 +52,23 @@ export function useOHLCVData(params: {
   });
 }
 
+// Open Interest hooks
+export function useOpenInterestData(params: {
+  asset?: string;
+  platform?: string;
+  timeframe?: string;
+  startDate?: Date;
+  endDate?: Date;
+  limit?: number;
+  offset?: number;
+}) {
+  return useQuery({
+    queryKey: ['open-interest', params],
+    queryFn: () => apiClient.getOpenInterest(params),
+    enabled: !!params.asset,
+  });
+}
+
 // Analytics hooks
 export function useAssetAnalytics(asset: string | null, platform: string = 'hyperliquid') {
   return useQuery({

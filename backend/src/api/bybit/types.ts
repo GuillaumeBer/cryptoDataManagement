@@ -100,3 +100,28 @@ export interface FetchedOHLCVData {
   quoteVolume: string;
   tradesCount: number;
 }
+
+export interface BybitOpenInterestItem {
+  openInterest: string; // Total open interest
+  timestamp: string; // Unix timestamp in milliseconds
+}
+
+export interface BybitOpenInterestResponse {
+  retCode: number;
+  retMsg: string;
+  result: {
+    category: string;
+    symbol: string;
+    list: BybitOpenInterestItem[];
+    nextPageCursor: string;
+  };
+  retExtInfo: {};
+  time: number;
+}
+
+export interface FetchedOIData {
+  asset: string;
+  timestamp: Date;
+  openInterest: string;
+  openInterestValue?: string;
+}

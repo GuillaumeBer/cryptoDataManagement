@@ -8,6 +8,8 @@ import {
   FetchedFundingData,
   HyperliquidCandle,
   FetchedOHLCVData,
+  HyperliquidMetaAndAssetCtxsResponse,
+  FetchedOIData,
 } from './types';
 
 export class HyperliquidClient {
@@ -256,6 +258,105 @@ export class HyperliquidClient {
       0
     );
     logger.info(`Fetched total of ${totalRecords} OHLCV records from Hyperliquid`);
+
+    return results;
+  }
+
+  /**
+   * Fetch current open interest snapshot for all assets
+   * Endpoint: POST /info with type "metaAndAssetCtxs"
+   *
+   * Note: Hyperliquid does NOT provide historical OI data via API
+   * This method returns a current snapshot only
+   *
+   * To build historical OI data, this method should be called periodically
+   * and results stored with timestamps
+   */
+  async getOpenInterestSnapshot(): Promise<Map<string, FetchedOIData>> {
+    try {
+      logger.debug('Fetching open interest snapshot from Hyperliquid');
+
+      const response = await this.client.post<HyperliquidMetaAndAssetCtxsResponse>('/info', {
+        type: 'metaAndAssetCtxs',
+      });
+
+      // Response is [{universe: [...], ...}, assetCtxs]
+      const meta = response.data[0];
+      const assetCtxs = response.data[1];
+      const universe = meta?.universe;
+
+      if (!assetCtxs || !Array.isArray(assetCtxs) || !universe || !Array.isArray(universe)) {
+        logger.warn('No asset contexts found in Hyperliquid response');
+        return new Map();
+      }
+
+      const results = new Map<string, FetchedOIData>();
+      const currentTime = new Date();
+
+      // Universe and assetCtxs are parallel arrays
+      for (let i = 0; i < Math.min(universe.length, assetCtxs.length); i++) {
+        const symbol = universe[i].name;
+        const ctx = assetCtxs[i];
+
+        results.set(symbol, {
+          asset: symbol,
+          timestamp: currentTime,
+          openInterest: ctx.openInterest,
+          openInterestValue: undefined, // Hyperliquid doesn't provide OI value
+        });
+      }
+
+      logger.debug(`Fetched open interest snapshot for ${results.size} assets from Hyperliquid`);
+      return results;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch open interest snapshot: ${errorMsg}`);
+      throw new Error(`Failed to fetch open interest snapshot: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch open interest for specific coins (returns current snapshot)
+   *
+   * Note: Hyperliquid only provides current snapshots, no historical data
+   * This is a compatibility method that calls getOpenInterestSnapshot
+   * and filters results to requested symbols
+   *
+   * @param coins - Array of coin symbols
+   * @param period - Ignored (Hyperliquid only provides snapshots)
+   * @param delayMs - Delay between requests (not used for snapshots)
+   * @param concurrency - Concurrency limit (not used for snapshots)
+   * @param onProgress - Progress callback
+   */
+  async getOpenInterestBatch(
+    coins: string[],
+    _period?: string | number,
+    _delayMs?: number,
+    _concurrency?: number,
+    onProgress?: (currentCoin: string, processed: number) => void
+  ): Promise<Map<string, FetchedOIData[]>> {
+    const results = new Map<string, FetchedOIData[]>();
+
+    logger.info(`Fetching open interest snapshot for ${coins.length} assets from Hyperliquid`);
+
+    // Get snapshot for all assets at once (Hyperliquid limitation)
+    const snapshot = await this.getOpenInterestSnapshot();
+
+    // Filter to requested coins and convert to array format
+    for (const coin of coins) {
+      const oiData = snapshot.get(coin);
+      if (oiData) {
+        results.set(coin, [oiData]); // Wrap in array for consistency with other platforms
+      } else {
+        results.set(coin, []);
+      }
+
+      if (onProgress) {
+        onProgress(coin, results.size);
+      }
+    }
+
+    logger.info(`Fetched open interest snapshot for ${results.size} assets from Hyperliquid`);
 
     return results;
   }

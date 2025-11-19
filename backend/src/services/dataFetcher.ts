@@ -8,8 +8,9 @@ import DyDxClient from '../api/dydx/client';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
 import OHLCVRepository from '../models/OHLCVRepository';
+import OpenInterestRepository from '../models/OpenInterestRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
-import { CreateFundingRateParams, CreateOHLCVParams } from '../models/types';
+import { CreateFundingRateParams, CreateOHLCVParams, CreateOpenInterestParams } from '../models/types';
 import {
   normalizePlatformAsset,
   SupportedPlatform,
@@ -37,6 +38,13 @@ interface OHLCVRecord {
   tradesCount: number;
 }
 
+interface OIRecord {
+  asset: string;
+  timestamp: Date;
+  openInterest: string;
+  openInterestValue?: string;
+}
+
 // Union type for all platform clients
 type PlatformClient = {
   getAssets(): Promise<PlatformAssetPayload[]>;
@@ -53,6 +61,13 @@ type PlatformClient = {
     concurrency?: number,
     onProgress?: (currentSymbol: string, processed: number) => void
   ): Promise<Map<string, OHLCVRecord[]>>;
+  getOpenInterestBatch(
+    symbols: string[],
+    period?: string | number,
+    delayMs?: number,
+    concurrency?: number,
+    onProgress?: (currentSymbol: string, processed: number) => void
+  ): Promise<Map<string, OIRecord[]>>;
 };
 
 export type ProgressPhase = 'fetch' | 'resample';
@@ -63,6 +78,8 @@ export type FetchStage =
   | 'fundingStore'
   | 'ohlcvFetch'
   | 'ohlcvStore'
+  | 'oiFetch'
+  | 'oiStore'
   | 'resample';
 
 export type StageStatus = 'pending' | 'active' | 'complete';
@@ -88,6 +105,7 @@ export interface ProgressEvent {
   currentAsset?: string;
   recordsFetched: number;
   ohlcvRecordsFetched?: number;
+  oiRecordsFetched?: number;
   resampleRecordsCreated?: number;
   resampleAssetsProcessed?: number;
   errors: string[];
@@ -101,6 +119,8 @@ const STAGE_LABELS: Record<FetchStage, string> = {
   fundingStore: 'Store funding rates',
   ohlcvFetch: 'Fetch OHLCV data',
   ohlcvStore: 'Store OHLCV data',
+  oiFetch: 'Fetch open interest',
+  oiStore: 'Store open interest',
   resample: 'Generate 8h aggregates',
 };
 
@@ -198,6 +218,8 @@ const INITIAL_STAGE_ORDER: FetchStage[] = [
   'fundingStore',
   'ohlcvFetch',
   'ohlcvStore',
+  'oiFetch',
+  'oiStore',
 ];
 
 const INCREMENTAL_STAGE_ORDER: FetchStage[] = [
@@ -205,6 +227,8 @@ const INCREMENTAL_STAGE_ORDER: FetchStage[] = [
   'fundingStore',
   'ohlcvFetch',
   'ohlcvStore',
+  'oiFetch',
+  'oiStore',
 ];
 
 interface EmitStageProgressArgs {
@@ -217,6 +241,7 @@ interface EmitStageProgressArgs {
   processedAssets: number;
   recordsFetched: number;
   ohlcvRecordsFetched?: number;
+  oiRecordsFetched?: number;
   errors: string[];
   currentAsset?: string;
   message?: string;
@@ -276,6 +301,34 @@ export class DataFetcherService extends EventEmitter {
         return '1H'; // OKX uses uppercase
       case 'dydx':
         return '1HOUR'; // DyDx uses full word
+      default:
+        return '1h';
+    }
+  }
+
+  /**
+   * Get the Open Interest interval/period for each platform
+   * Platform-specific intervals for OI data fetching:
+   * - Binance: "1h" (hourly period)
+   * - Bybit: "1h" (hourly interval)
+   * - OKX: "1H" (uppercase, hourly period)
+   * - Hyperliquid: N/A (snapshot only)
+   * - DyDx: "1HOUR" (extracted from candles)
+   * - Aster: "1h" (Binance-compatible)
+   */
+  private getOIInterval(): string | number {
+    switch (this.platform) {
+      case 'binance':
+      case 'aster':
+        return '1h';
+      case 'bybit':
+        return '1h'; // Bybit OI uses '1h' not minutes
+      case 'okx':
+        return '1H'; // OKX uses uppercase
+      case 'dydx':
+        return '1HOUR'; // DyDx uses full word
+      case 'hyperliquid':
+        return '1h'; // Not used (snapshot only), but provide default
       default:
         return '1h';
     }
@@ -444,6 +497,7 @@ export class DataFetcherService extends EventEmitter {
     recordsFetched: number;
     errors: string[];
     ohlcvRecordsFetched?: number;
+    oiRecordsFetched?: number;
     stageState?: {
       order: FetchStage[];
       map: StageStateMap;
@@ -473,6 +527,7 @@ export class DataFetcherService extends EventEmitter {
           processedAssets: context.assetsProcessed,
           recordsFetched: context.recordsFetched,
           ohlcvRecordsFetched: context.ohlcvRecordsFetched,
+          oiRecordsFetched: context.oiRecordsFetched,
           errors: context.errors,
           message: 'Fetch complete',
         });
@@ -580,6 +635,7 @@ export class DataFetcherService extends EventEmitter {
     assetsProcessed: number;
     recordsFetched: number;
     ohlcvRecordsFetched: number;
+    oiRecordsFetched: number;
     errors: string[];
   }> {
     // Prevent concurrent fetches
@@ -642,6 +698,8 @@ export class DataFetcherService extends EventEmitter {
         fundingStore: assetSymbols.length,
         ohlcvFetch: assetSymbols.length,
         ohlcvStore: assetSymbols.length,
+        oiFetch: assetSymbols.length,
+        oiStore: assetSymbols.length,
       };
       if (this.platform === 'hyperliquid') {
         stageTotals.resample = assetSymbols.length;
@@ -915,6 +973,120 @@ export class DataFetcherService extends EventEmitter {
         message: 'OHLCV data stored',
       });
 
+      // Step 6: Fetch Open Interest data
+      let oiRecordsFetched = 0;
+      let oiAssetsProcessed = 0;
+      logger.info(`Fetching Open Interest data for ${assetSymbols.length} assets from ${this.platform}`);
+
+      updateStage(stageMap, 'oiFetch', {
+        status: 'active',
+        message: 'Fetching Open Interest data...',
+      });
+
+      const oiDataMap = await this.platformClient.getOpenInterestBatch(
+        assetSymbols,
+        this.getOIInterval(),
+        this.getRateLimitDelay(),
+        this.getConcurrencyLimit(),
+        (currentSymbol: string, processed: number) => {
+          updateStage(stageMap, 'oiFetch', {
+            completed: processed,
+            currentItem: currentSymbol,
+          });
+          this.emitStageProgress({
+            stageKey: 'oiFetch',
+            stageOrder,
+            stageMap,
+            totalAssets: assetSymbols.length,
+            processedAssets: assetsProcessed,
+            currentAsset: currentSymbol,
+            recordsFetched,
+            ohlcvRecordsFetched,
+            oiRecordsFetched: 0,
+            errors,
+            message: 'Fetching Open Interest data...',
+          });
+        }
+      );
+      updateStage(stageMap, 'oiFetch', {
+        completed: assetSymbols.length,
+        status: 'complete',
+        currentItem: undefined,
+        message: 'Open Interest data fetched',
+      });
+
+      // Step 7: Store Open Interest data
+      updateStage(stageMap, 'oiStore', {
+        status: 'active',
+        message: 'Storing Open Interest data...',
+      });
+      let oiStoreProgress = 0;
+      for (const [symbol, oiData] of oiDataMap.entries()) {
+        try {
+          const assetId = assetMap.get(symbol);
+          if (!assetId) {
+            errors.push(`Asset not found for Open Interest: ${symbol}`);
+            continue;
+          }
+
+          const records: CreateOpenInterestParams[] = oiData.map((data) => ({
+            asset_id: assetId,
+            timestamp: data.timestamp,
+            timeframe: '1h',
+            open_interest: data.openInterest,
+            open_interest_value: data.openInterestValue,
+            platform: this.platform,
+          }));
+
+          const inserted = await OpenInterestRepository.bulkInsert(records);
+          oiRecordsFetched += inserted;
+          oiAssetsProcessed++;
+
+          logger.debug(`Stored ${inserted} Open Interest records for ${symbol}`);
+        } catch (error) {
+          const errorMsg = `Failed to store Open Interest data for ${symbol}: ${error}`;
+          logger.error(errorMsg);
+          errors.push(errorMsg);
+        } finally {
+          oiStoreProgress++;
+          updateStage(stageMap, 'oiStore', {
+            completed: oiStoreProgress,
+            currentItem: symbol,
+          });
+          this.emitStageProgress({
+            stageKey: 'oiStore',
+            stageOrder,
+            stageMap,
+            totalAssets: assetSymbols.length,
+            processedAssets: assetsProcessed,
+            currentAsset: symbol,
+            recordsFetched,
+            ohlcvRecordsFetched,
+            oiRecordsFetched,
+            errors,
+            message: 'Storing Open Interest data...',
+          });
+        }
+      }
+      updateStage(stageMap, 'oiStore', {
+        status: 'complete',
+        completed: assetSymbols.length,
+        currentItem: undefined,
+        message: 'Open Interest data stored',
+      });
+      this.emitStageProgress({
+        stageKey: 'oiStore',
+        stageOrder,
+        stageMap,
+        totalAssets: assetSymbols.length,
+        processedAssets: assetsProcessed,
+        recordsFetched,
+        ohlcvRecordsFetched,
+        oiRecordsFetched,
+        errors,
+        message: 'Open Interest data stored',
+      });
+
       // Update fetch log
       const status = errors.length === 0 ? 'success' : errors.length < assets.length ? 'partial' : 'failed';
       await FetchLogRepository.complete(
@@ -926,21 +1098,22 @@ export class DataFetcherService extends EventEmitter {
       );
 
       logger.info(
-        `Initial fetch completed: ${assetsProcessed} assets, ${recordsFetched} funding rate records, ${ohlcvRecordsFetched} OHLCV records, ${errors.length} errors`
+        `Initial fetch completed: ${assetsProcessed} assets, ${recordsFetched} funding rate records, ${ohlcvRecordsFetched} OHLCV records, ${oiRecordsFetched} OI records, ${errors.length} errors`
       );
 
       // Emit completion/resampling events
-      logger.info(`[PROGRESS] COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} funding rate records, ${ohlcvRecordsFetched} OHLCV records fetched`);
+      logger.info(`[PROGRESS] COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} funding rate records, ${ohlcvRecordsFetched} OHLCV records, ${oiRecordsFetched} OI records fetched`);
       await this.finalizeFetchProgress({
         totalAssets: assets.length,
         assetsProcessed,
         recordsFetched,
         ohlcvRecordsFetched,
+        oiRecordsFetched,
         errors,
         stageState: stageState ?? undefined,
       });
 
-      return { assetsProcessed, recordsFetched, ohlcvRecordsFetched, errors };
+      return { assetsProcessed, recordsFetched, ohlcvRecordsFetched, oiRecordsFetched, errors };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       logger.error('Initial data fetch failed:', errorMsg);
@@ -1001,6 +1174,7 @@ export class DataFetcherService extends EventEmitter {
     assetsProcessed: number;
     recordsFetched: number;
     ohlcvRecordsFetched: number;
+    oiRecordsFetched: number;
     errors: string[];
   }> {
     // Prevent concurrent fetches
@@ -1018,6 +1192,7 @@ export class DataFetcherService extends EventEmitter {
     let assetsProcessed = 0;
     let recordsFetched = 0;
     let ohlcvRecordsFetched = 0;
+    let oiRecordsFetched = 0;
     const errors: string[] = [];
     let stageState: { order: FetchStage[]; map: StageStateMap } | null = null;
     let totalAssetsTarget = 0;
@@ -1030,7 +1205,7 @@ export class DataFetcherService extends EventEmitter {
       if (assets.length === 0) {
         logger.warn('No assets found. Run initial fetch first.');
         await FetchLogRepository.complete(fetchLog.id, 'failed', 0, 0, 'No assets found');
-        return { assetsProcessed: 0, recordsFetched: 0, ohlcvRecordsFetched: 0, errors: ['No assets found'] };
+        return { assetsProcessed: 0, recordsFetched: 0, ohlcvRecordsFetched: 0, oiRecordsFetched: 0, errors: ['No assets found'] };
       }
 
       const stageOrder =
@@ -1042,6 +1217,8 @@ export class DataFetcherService extends EventEmitter {
         fundingStore: assets.length,
         ohlcvFetch: assets.length,
         ohlcvStore: assets.length,
+        oiFetch: assets.length,
+        oiStore: assets.length,
       };
       if (this.platform === 'hyperliquid') {
         stageTotals.resample = assets.length;
@@ -1334,6 +1511,123 @@ export class DataFetcherService extends EventEmitter {
         message: 'OHLCV updates stored',
       });
 
+      // Step 6: Fetch Open Interest updates
+      let oiAssetsProcessed = 0;
+      let oiRecordsFetched = 0;
+      logger.info(`Fetching Open Interest updates for ${assets.length} assets from ${this.platform}`);
+
+      // Build symbol -> assetId map for OI data storage
+      const assetMap = new Map(assets.map((asset) => [asset.symbol, asset.id]));
+
+      updateStage(stageMap, 'oiFetch', {
+        status: 'active',
+        message: 'Fetching Open Interest updates...',
+      });
+
+      const oiDataMap = await this.platformClient.getOpenInterestBatch(
+        assetSymbols,
+        this.getOIInterval(),
+        this.getRateLimitDelay(),
+        this.getConcurrencyLimit(),
+        (currentSymbol: string, processed: number) => {
+          updateStage(stageMap, 'oiFetch', {
+            completed: processed,
+            currentItem: currentSymbol,
+          });
+          this.emitStageProgress({
+            stageKey: 'oiFetch',
+            stageOrder,
+            stageMap,
+            totalAssets: assets.length,
+            processedAssets: assetsProcessed,
+            currentAsset: currentSymbol,
+            recordsFetched,
+            ohlcvRecordsFetched,
+            oiRecordsFetched: 0,
+            errors,
+            message: 'Fetching Open Interest updates...',
+          });
+        }
+      );
+      updateStage(stageMap, 'oiFetch', {
+        completed: assets.length,
+        status: 'complete',
+        currentItem: undefined,
+        message: 'Open Interest updates fetched',
+      });
+
+      // Step 7: Store Open Interest updates
+      updateStage(stageMap, 'oiStore', {
+        status: 'active',
+        message: 'Storing Open Interest updates...',
+      });
+      let oiStoreProgress = 0;
+      for (const [symbol, oiData] of oiDataMap.entries()) {
+        try {
+          const assetId = assetMap.get(symbol);
+          if (!assetId) {
+            errors.push(`Asset not found for Open Interest: ${symbol}`);
+            continue;
+          }
+
+          const records: CreateOpenInterestParams[] = oiData.map((data) => ({
+            asset_id: assetId,
+            timestamp: data.timestamp,
+            timeframe: '1h',
+            open_interest: data.openInterest,
+            open_interest_value: data.openInterestValue,
+            platform: this.platform,
+          }));
+
+          const inserted = await OpenInterestRepository.bulkInsert(records);
+          oiRecordsFetched += inserted;
+          oiAssetsProcessed++;
+
+          logger.debug(`Stored ${inserted} Open Interest records for ${symbol}`);
+        } catch (error) {
+          const errorMsg = `Failed to store Open Interest data for ${symbol}: ${error}`;
+          logger.error(errorMsg);
+          errors.push(errorMsg);
+        } finally {
+          oiStoreProgress++;
+          updateStage(stageMap, 'oiStore', {
+            completed: oiStoreProgress,
+            currentItem: symbol,
+          });
+          this.emitStageProgress({
+            stageKey: 'oiStore',
+            stageOrder,
+            stageMap,
+            totalAssets: assets.length,
+            processedAssets: assetsProcessed,
+            currentAsset: symbol,
+            recordsFetched,
+            ohlcvRecordsFetched,
+            oiRecordsFetched,
+            errors,
+            message: 'Storing Open Interest updates...',
+          });
+        }
+      }
+      updateStage(stageMap, 'oiStore', {
+        status: 'complete',
+        completed: assets.length,
+        currentItem: undefined,
+        message: 'Open Interest updates stored',
+      });
+      this.emitStageProgress({
+        stageKey: 'oiStore',
+        stageOrder,
+        stageMap,
+        totalAssets: assets.length,
+        processedAssets: assetsProcessed,
+        recordsFetched,
+        ohlcvRecordsFetched,
+        oiRecordsFetched,
+        errors,
+        message: 'Open Interest updates stored',
+      });
+
       // Update fetch log
       const status = errors.length === 0 ? 'success' : 'partial';
       await FetchLogRepository.complete(
@@ -1345,23 +1639,24 @@ export class DataFetcherService extends EventEmitter {
       );
 
       logger.info(
-        `Incremental fetch completed: ${assetsProcessed} assets, ${recordsFetched} new funding rate records, ${ohlcvRecordsFetched} new OHLCV records, ${errors.length} errors`
+        `Incremental fetch completed: ${assetsProcessed} assets, ${recordsFetched} new funding rate records, ${ohlcvRecordsFetched} new OHLCV records, ${oiRecordsFetched} new OI records, ${errors.length} errors`
       );
 
       // Emit completion/resampling events
       logger.info(
-        `[PROGRESS] INCREMENTAL COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} funding rate records, ${ohlcvRecordsFetched} OHLCV records fetched`
+        `[PROGRESS] INCREMENTAL COMPLETE: ${assetsProcessed}/${assets.length} assets, ${recordsFetched} funding rate records, ${ohlcvRecordsFetched} OHLCV records, ${oiRecordsFetched} OI records fetched`
       );
       await this.finalizeFetchProgress({
         totalAssets: assets.length,
         assetsProcessed,
         recordsFetched,
         ohlcvRecordsFetched,
+        oiRecordsFetched,
         errors,
         stageState: stageState ?? undefined,
       });
 
-      return { assetsProcessed, recordsFetched, ohlcvRecordsFetched, errors };
+      return { assetsProcessed, recordsFetched, ohlcvRecordsFetched, oiRecordsFetched, errors };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       logger.error('Incremental data fetch failed:', errorMsg);

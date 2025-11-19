@@ -79,3 +79,10 @@ export interface FetchedOHLCVData {
   quoteVolume: string;
   tradesCount: number;
 }
+
+export interface FetchedOIData {
+  asset: string;
+  timestamp: Date;
+  openInterest: string;
+  openInterestValue?: string;
+}

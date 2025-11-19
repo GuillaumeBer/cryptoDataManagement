@@ -5,12 +5,13 @@ import { getSchedulerStatus } from '../services/scheduler';
 import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
 import OHLCVRepository from '../models/OHLCVRepository';
+import OpenInterestRepository from '../models/OpenInterestRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
 import UnifiedAssetRepository from '../models/UnifiedAssetRepository';
 import assetMappingService from '../services/assetMappingService';
 import { logger } from '../utils/logger';
 import createProgressStream from './createProgressStream';
-import type { OHLCVDataWithAsset } from '../models/types';
+import type { OHLCVDataWithAsset, OpenInterestWithAsset } from '../models/types';
 
 const router = Router();
 
@@ -24,6 +25,12 @@ const serializeOHLCVRecord = (record: OHLCVDataWithAsset) => ({
   close: Number(record.close),
   volume: parseDecimal(record.volume),
   quote_volume: parseDecimal(record.quote_volume),
+});
+
+const serializeOpenInterestRecord = (record: OpenInterestWithAsset) => ({
+  ...record,
+  open_interest: Number(record.open_interest),
+  open_interest_value: parseDecimal(record.open_interest_value),
 });
 
 /**
@@ -443,6 +450,129 @@ router.get('/ohlcv', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch OHLCV data',
+      error: `${error}`,
+    });
+  }
+});
+
+const MAX_OPEN_INTEREST_LIMIT = 10000;
+
+const openInterestQuerySchema = z
+  .object({
+    asset: z.string().trim().min(1, { message: 'asset cannot be empty' }).optional(),
+    platform: z.string().trim().min(1, { message: 'platform cannot be empty' }).optional(),
+    timeframe: z
+      .string()
+      .trim()
+      .min(1, { message: 'timeframe cannot be empty' })
+      .optional(),
+    startDate: dateStringSchema.optional(),
+    endDate: dateStringSchema.optional(),
+    limit: z
+      .preprocess(value => {
+        if (typeof value === 'string' && value.trim() !== '') {
+          const parsed = Number(value);
+          return Number.isNaN(parsed) ? value : parsed;
+        }
+        return value;
+      }, z.number().int().min(1).max(MAX_OPEN_INTEREST_LIMIT))
+      .optional()
+      .default(1000),
+    offset: z
+      .preprocess(value => {
+        if (typeof value === 'string' && value.trim() !== '') {
+          const parsed = Number(value);
+          return Number.isNaN(parsed) ? value : parsed;
+        }
+        return value;
+      }, z.number().int().min(0))
+      .optional()
+      .default(0),
+  })
+  .superRefine((data, ctx) => {
+    if (data.startDate && data.endDate && data.startDate > data.endDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'startDate must be before or equal to endDate',
+        path: ['startDate'],
+      });
+    }
+  });
+
+/**
+ * GET /api/open-interest
+ * Get Open Interest data with filters
+ * Query params: asset, startDate, endDate, platform, timeframe, limit, offset
+ */
+router.get('/open-interest', async (req: Request, res: Response) => {
+  try {
+    const parseResult = openInterestQuerySchema.safeParse(req.query);
+
+    if (!parseResult.success) {
+      const { fieldErrors, formErrors } = parseResult.error.flatten();
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid query parameters for Open Interest data',
+        errors: {
+          ...fieldErrors,
+          ...(formErrors.length ? { _errors: formErrors } : {}),
+        },
+      });
+    }
+
+    const { asset, startDate, endDate, platform, timeframe, limit, offset } = parseResult.data;
+
+    logger.info('[API] Open Interest request', {
+      asset,
+      startDate,
+      endDate,
+      platform,
+      timeframe,
+      limit,
+      offset,
+    });
+
+    const query: any = {
+      limit,
+      offset,
+    };
+
+    if (asset) query.asset = asset;
+    if (platform) query.platform = platform;
+    if (timeframe) query.timeframe = timeframe;
+    if (startDate) query.startDate = startDate;
+    if (endDate) query.endDate = endDate;
+
+    logger.debug('[API] Querying Open Interest with', query);
+    const openInterestData = await OpenInterestRepository.find(query);
+    logger.info(`[API] Found ${openInterestData.length} Open Interest records for query:`, query);
+    const serializedData = openInterestData.map(serializeOpenInterestRecord);
+    logger.info('[API] Open Interest query completed', {
+      asset,
+      platform: query.platform || 'all',
+      timeframe: query.timeframe || 'all',
+      results: serializedData.length,
+    });
+
+    res.json({
+      success: true,
+      data: serializedData,
+      count: serializedData.length,
+      query: {
+        asset: query.asset || 'all',
+        platform: query.platform || 'all',
+        timeframe: query.timeframe || 'all',
+        startDate: query.startDate,
+        endDate: query.endDate,
+        limit: query.limit,
+        offset: query.offset,
+      },
+    });
+  } catch (error) {
+    logger.error('Open Interest endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch Open Interest data',
       error: `${error}`,
     });
   }

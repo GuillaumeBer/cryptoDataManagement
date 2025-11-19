@@ -56,3 +56,17 @@ export interface FetchedOHLCVData {
   tradesCount: number;
 }
 
+export interface AsterOpenInterest {
+  symbol: string;
+  sumOpenInterest: string; // Total open interest in contracts
+  sumOpenInterestValue: string; // Total open interest value in USD
+  timestamp: number; // Unix timestamp in milliseconds
+}
+
+export interface FetchedOIData {
+  asset: string;
+  timestamp: Date;
+  openInterest: string;
+  openInterestValue?: string;
+}
+

@@ -83,11 +83,11 @@ export class UnifiedAssetRepository {
    * Create a new unified asset
    */
   async create(params: CreateUnifiedAssetParams): Promise<UnifiedAsset> {
-    const { normalized_symbol, display_name, description, coingecko_id, coingecko_name, coingecko_symbol, market_cap_usd } = params;
+    const { normalized_symbol, display_name, description, coingecko_id, coingecko_name, coingecko_symbol, market_cap_usd, market_cap_rank } = params;
 
     const result = await query<UnifiedAsset>(
-      `INSERT INTO unified_assets (normalized_symbol, display_name, description, coingecko_id, coingecko_name, coingecko_symbol, market_cap_usd)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO unified_assets (normalized_symbol, display_name, description, coingecko_id, coingecko_name, coingecko_symbol, market_cap_usd, market_cap_rank)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        ON CONFLICT (normalized_symbol) DO UPDATE
        SET display_name = COALESCE(EXCLUDED.display_name, unified_assets.display_name),
            description = COALESCE(EXCLUDED.description, unified_assets.description),
@@ -95,9 +95,10 @@ export class UnifiedAssetRepository {
            coingecko_name = COALESCE(EXCLUDED.coingecko_name, unified_assets.coingecko_name),
            coingecko_symbol = COALESCE(EXCLUDED.coingecko_symbol, unified_assets.coingecko_symbol),
            market_cap_usd = COALESCE(EXCLUDED.market_cap_usd, unified_assets.market_cap_usd),
+           market_cap_rank = COALESCE(EXCLUDED.market_cap_rank, unified_assets.market_cap_rank),
            updated_at = NOW()
        RETURNING *`,
-      [normalized_symbol, display_name || null, description || null, coingecko_id || null, coingecko_name || null, coingecko_symbol || null, market_cap_usd || null]
+      [normalized_symbol, display_name || null, description || null, coingecko_id || null, coingecko_name || null, coingecko_symbol || null, market_cap_usd || null, market_cap_rank || null]
     );
 
     logger.info(`Unified asset created/updated: ${normalized_symbol}`);
@@ -108,7 +109,7 @@ export class UnifiedAssetRepository {
    * Update a unified asset
    */
   async update(id: number, params: Partial<CreateUnifiedAssetParams>): Promise<UnifiedAsset | null> {
-    const { normalized_symbol, display_name, description, coingecko_id, coingecko_name, coingecko_symbol, market_cap_usd } = params;
+    const { normalized_symbol, display_name, description, coingecko_id, coingecko_name, coingecko_symbol, market_cap_usd, market_cap_rank } = params;
 
     const updates: string[] = [];
     const values: any[] = [];
@@ -147,6 +148,11 @@ export class UnifiedAssetRepository {
     if (market_cap_usd !== undefined) {
       updates.push(`market_cap_usd = $${paramIndex++}`);
       values.push(market_cap_usd);
+    }
+
+    if (market_cap_rank !== undefined) {
+      updates.push(`market_cap_rank = $${paramIndex++}`);
+      values.push(market_cap_rank);
     }
 
     if (updates.length === 0) {
@@ -208,6 +214,7 @@ export class UnifiedAssetRepository {
         ua.coingecko_name,
         ua.coingecko_symbol,
         ua.market_cap_usd,
+        ua.market_cap_rank,
         ua.created_at,
         ua.updated_at,
         COUNT(DISTINCT a.platform)::integer as platform_count,
@@ -219,7 +226,7 @@ export class UnifiedAssetRepository {
       JOIN assets a ON am.asset_id = a.id
       WHERE a.is_active = true
       GROUP BY ua.id, ua.normalized_symbol, ua.display_name, ua.description,
-               ua.coingecko_id, ua.coingecko_name, ua.coingecko_symbol, ua.market_cap_usd,
+               ua.coingecko_id, ua.coingecko_name, ua.coingecko_symbol, ua.market_cap_usd, ua.market_cap_rank,
                ua.created_at, ua.updated_at
       HAVING COUNT(DISTINCT a.platform) >= $1
       ORDER BY ua.market_cap_usd DESC NULLS LAST, platform_count DESC, ua.normalized_symbol ASC`,

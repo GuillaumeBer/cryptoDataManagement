@@ -8,6 +8,8 @@ import {
   FetchedFundingData,
   BybitKlineResponse,
   FetchedOHLCVData,
+  BybitOpenInterestResponse,
+  FetchedOIData,
 } from './types';
 
 /**
@@ -345,6 +347,117 @@ export class BybitClient {
       0
     );
     logger.info(`Fetched total of ${totalRecords} OHLCV records from Bybit`);
+
+    return results;
+  }
+
+  /**
+   * Fetch open interest history for a specific symbol
+   * Endpoint: GET /v5/market/open-interest
+   *
+   * API Documentation:
+   * - Supports intervals: 5min, 15min, 30min, 1h, 4h, 1d
+   * - Max limit: 200 records per request
+   *
+   * Rate Limits:
+   * - 50 requests per 2 seconds (~1500 req/min)
+   */
+  async getOpenInterest(symbol: string, intervalTime: string = '1h'): Promise<FetchedOIData[]> {
+    try {
+      logger.debug(`Fetching open interest history for ${symbol} from Bybit`);
+
+      // Calculate time range: 480 hours ago to match funding rate and OHLCV depth
+      const hoursAgo = 480;
+      const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
+      const endTime = Date.now();
+
+      const response = await this.client.get<BybitOpenInterestResponse>('/v5/market/open-interest', {
+        params: {
+          category: 'linear',
+          symbol,
+          intervalTime,
+          startTime,
+          endTime,
+          limit: 200, // Max allowed by Bybit
+        },
+      });
+
+      // Check if request was successful
+      if (response.data.retCode !== 0) {
+        throw new Error(`Bybit API error: ${response.data.retMsg}`);
+      }
+
+      const oiData = response.data.result.list;
+      if (!oiData || !Array.isArray(oiData)) {
+        logger.warn(`No open interest data found for ${symbol}`);
+        return [];
+      }
+
+      const results: FetchedOIData[] = oiData.map((point) => ({
+        asset: symbol,
+        timestamp: new Date(parseInt(point.timestamp)),
+        openInterest: point.openInterest,
+        openInterestValue: undefined, // Bybit doesn't provide OI value in this endpoint
+      }));
+
+      logger.debug(`Fetched ${results.length} open interest records for ${symbol}`);
+      return results;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch open interest for ${symbol}: ${errorMsg}`);
+      throw new Error(`Failed to fetch open interest for ${symbol}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch open interest history for multiple symbols with rate limiting
+   *
+   * Bybit Rate Limits:
+   * - /v5/market/open-interest endpoint: 50 requests per 2 seconds
+   * - Conservative delay: 600ms (100 requests/min) to stay well within limits
+   */
+  async getOpenInterestBatch(
+    symbols: string[],
+    intervalTime: string = '1h',
+    delayMs: number = 600,
+    concurrency: number = 1,
+    onProgress?: (currentSymbol: string, processed: number) => void
+  ): Promise<Map<string, FetchedOIData[]>> {
+    const results = new Map<string, FetchedOIData[]>();
+
+    logger.info(`Fetching open interest data for ${symbols.length} assets from Bybit`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      symbols,
+      async (symbol) => {
+        try {
+          logger.info(`[API] Fetching OI ${symbol} from Bybit...`);
+          const data = await this.getOpenInterest(symbol, intervalTime);
+          results.set(symbol, data);
+          logger.info(`[API] ✓ ${symbol}: ${data.length} OI records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch open interest for ${symbol}`, errorMsg);
+          results.set(symbol, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(symbol, processed);
+          }
+        }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
+
+    const totalRecords = Array.from(results.values()).reduce(
+      (sum, data) => sum + data.length,
+      0
+    );
+    logger.info(`Fetched total of ${totalRecords} open interest records from Bybit`);
 
     return results;
   }

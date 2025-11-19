@@ -8,6 +8,8 @@ import {
   FetchedFundingData,
   BinanceKline,
   FetchedOHLCVData,
+  BinanceOpenInterest,
+  FetchedOIData,
 } from './types';
 
 export class BinanceClient {
@@ -291,6 +293,116 @@ export class BinanceClient {
       0
     );
     logger.info(`Fetched total of ${totalRecords} OHLCV records from Binance Futures`);
+
+    return results;
+  }
+
+  /**
+   * Fetch open interest history for a specific symbol
+   * Endpoint: GET /fapi/v1/openInterest
+   *
+   * API Documentation:
+   * - Can be used to get current OI or historical OI with time range
+   * - Supports periods: 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d
+   * - Max limit: 500 records per request
+   *
+   * Rate Limits:
+   * - Weight: 1 per request
+   * - Very permissive (2400 requests per minute)
+   */
+  async getOpenInterest(symbol: string, period: string = '1h'): Promise<FetchedOIData[]> {
+    try {
+      logger.debug(`Fetching open interest history for ${symbol} from Binance`);
+
+      // Calculate time range: 480 hours ago to match funding rate and OHLCV depth
+      const hoursAgo = 480;
+      const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
+      const endTime = Date.now();
+
+      const response = await this.client.get<BinanceOpenInterest[]>('/fapi/v1/openInterest', {
+        params: {
+          symbol,
+          period,
+          startTime,
+          endTime,
+          limit: 500, // Max allowed by Binance
+        },
+      });
+
+      const oiData = response.data;
+      if (!oiData || !Array.isArray(oiData)) {
+        logger.warn(`No open interest data found for ${symbol}`);
+        return [];
+      }
+
+      const results: FetchedOIData[] = oiData.map((point) => ({
+        asset: symbol,
+        timestamp: new Date(point.timestamp),
+        openInterest: point.sumOpenInterest,
+        openInterestValue: point.sumOpenInterestValue,
+      }));
+
+      logger.debug(`Fetched ${results.length} open interest records for ${symbol}`);
+      return results;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch open interest for ${symbol}: ${errorMsg}`);
+      throw new Error(`Failed to fetch open interest for ${symbol}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch open interest history for multiple symbols with rate limiting
+   *
+   * Binance Rate Limits:
+   * - /fapi/v1/openInterest endpoint: Weight 1, 2400 requests per minute
+   * - Very high limit, using same conservative delay as other endpoints
+   *
+   * Default Strategy:
+   * - 700ms delay = ~86 requests/min for consistency with other endpoints
+   */
+  async getOpenInterestBatch(
+    symbols: string[],
+    period: string = '1h',
+    delayMs: number = 700,
+    concurrency: number = 1,
+    onProgress?: (currentSymbol: string, processed: number) => void
+  ): Promise<Map<string, FetchedOIData[]>> {
+    const results = new Map<string, FetchedOIData[]>();
+
+    logger.info(`Fetching open interest data for ${symbols.length} assets from Binance Futures`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      symbols,
+      async (symbol) => {
+        try {
+          logger.info(`[API] Fetching OI ${symbol} from Binance...`);
+          const data = await this.getOpenInterest(symbol, period);
+          results.set(symbol, data);
+          logger.info(`[API] ✓ ${symbol}: ${data.length} OI records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch open interest for ${symbol}`, errorMsg);
+          results.set(symbol, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(symbol, processed);
+          }
+        }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
+
+    const totalRecords = Array.from(results.values()).reduce(
+      (sum, data) => sum + data.length,
+      0
+    );
+    logger.info(`Fetched total of ${totalRecords} open interest records from Binance Futures`);
 
     return results;
   }

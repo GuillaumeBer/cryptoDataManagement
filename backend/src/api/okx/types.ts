@@ -81,3 +81,24 @@ export interface FetchedOHLCVData {
   quoteVolume: string;
   tradesCount: number;
 }
+
+export interface OKXOpenInterest {
+  instId: string; // e.g., "BTC-USDT-SWAP"
+  instType: string; // "SWAP"
+  oi: string; // Open interest (number of contracts)
+  oiCcy: string; // Open interest value in currency
+  ts: string; // Unix timestamp in milliseconds
+}
+
+export interface OKXOpenInterestResponse {
+  code: string; // "0" for success
+  msg: string;
+  data: OKXOpenInterest[];
+}
+
+export interface FetchedOIData {
+  asset: string;
+  timestamp: Date;
+  openInterest: string;
+  openInterestValue?: string;
+}

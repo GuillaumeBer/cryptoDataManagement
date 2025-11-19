@@ -3,6 +3,7 @@ import { useSystemStatus, useAssets } from '../hooks/useApi';
 import AssetSelector from './AssetSelector';
 import FundingRateChart from './FundingRateChart';
 import OHLCVChart from './OHLCVChart';
+import OpenInterestChart from './OpenInterestChart';
 import Analytics from './Analytics';
 import DataFetcher from './DataFetcher';
 import StatusBar from './StatusBar';
@@ -12,9 +13,9 @@ import { PLATFORMS, type Platform } from '../constants/platforms';
 
 const METRICS_ROADMAP = [
   { id: 'funding', label: 'Funding rate', state: 'Live now' },
-  { id: 'oi', label: 'Open interest', state: 'Designing' },
+  { id: 'oi', label: 'Open interest', state: 'Live now' },
+  { id: 'ohlcv', label: 'OHLCV', state: 'Live now' },
   { id: 'volume', label: 'Perpetual volume', state: 'Planned' },
-  { id: 'ohlcv', label: 'OHLCV', state: 'Exploring' },
 ];
 
 const badgeStyles: Record<string, string> = {
@@ -224,6 +225,9 @@ export default function Dashboard() {
                 </div>
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                   <FundingRateChart asset={selectedAsset} platform={selectedPlatform} />
+                </div>
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                  <OpenInterestChart asset={selectedAsset} platform={selectedPlatform} />
                 </div>
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                   <OHLCVChart asset={selectedAsset} platform={selectedPlatform} />

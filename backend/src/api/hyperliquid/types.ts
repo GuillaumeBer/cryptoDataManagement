@@ -68,3 +68,39 @@ export interface FetchedOHLCVData {
   quoteVolume: string;
   tradesCount: number;
 }
+
+export interface HyperliquidAssetContext {
+  coin: string;
+  funding: string;
+  openInterest: string;
+  prevDayPx: string;
+  dayNtlVlm: string;
+  premium: string;
+  oraclePx: string;
+  markPx: string;
+  midPx: string;
+}
+
+// Hyperliquid API returns an array: [meta, assetCtxs]
+export type HyperliquidMetaAndAssetCtxsResponse = [
+  {
+    universe: Array<{
+      name: string;
+      szDecimals: number;
+      maxLeverage: number;
+      marginTableId?: number;
+      onlyIsolated?: boolean;
+      isDelisted?: boolean;
+    }>;
+    marginTables?: any;
+    collateralToken?: any;
+  },
+  HyperliquidAssetContext[]
+];
+
+export interface FetchedOIData {
+  asset: string;
+  timestamp: Date;
+  openInterest: string;
+  openInterestValue?: string;
+}

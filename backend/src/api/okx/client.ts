@@ -8,6 +8,8 @@ import {
   FetchedFundingData,
   OKXKlineResponse,
   FetchedOHLCVData,
+  OKXOpenInterestResponse,
+  FetchedOIData,
 } from './types';
 
 /**
@@ -430,6 +432,111 @@ export class OKXClient {
       0
     );
     logger.info(`Fetched total of ${totalRecords} OHLCV records from OKX`);
+
+    return results;
+  }
+
+  /**
+   * Fetch open interest for a specific instrument
+   * Endpoint: GET /api/v5/public/open-interest
+   *
+   * API Documentation:
+   * - Returns open interest data with optional historical period
+   * - Supports periods: 5m, 1H, 1D
+   *
+   * Rate Limits:
+   * - 20 requests per 2 seconds (~600 req/min)
+   */
+  async getOpenInterest(instId: string, period: string = '1H'): Promise<FetchedOIData[]> {
+    try {
+      logger.debug(`Fetching open interest for ${instId} from OKX`);
+
+      // OKX returns last 100 data points for the specified period
+      // For 1H period, this gives us ~100 hours of data
+      // We'll need to make multiple calls or use current snapshot
+      const response = await this.client.get<OKXOpenInterestResponse>('/api/v5/public/open-interest', {
+        params: {
+          instId,
+          period, // '1H' for 1-hour data points
+        },
+      });
+
+      // Check if request was successful
+      if (response.data.code !== '0') {
+        throw new Error(`OKX API error: ${response.data.msg}`);
+      }
+
+      const oiData = response.data.data;
+      if (!oiData || !Array.isArray(oiData)) {
+        logger.warn(`No open interest data found for ${instId}`);
+        return [];
+      }
+
+      const results: FetchedOIData[] = oiData.map((point) => ({
+        asset: instId,
+        timestamp: new Date(parseInt(point.ts)),
+        openInterest: point.oi,
+        openInterestValue: point.oiCcy,
+      }));
+
+      logger.debug(`Fetched ${results.length} open interest records for ${instId}`);
+      return results;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch open interest for ${instId}: ${errorMsg}`);
+      throw new Error(`Failed to fetch open interest for ${instId}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch open interest for multiple instruments with rate limiting
+   *
+   * OKX Rate Limits:
+   * - /api/v5/public/open-interest endpoint: 20 requests per 2 seconds
+   * - Conservative delay: 600ms (100 requests/min) to stay well within limits
+   */
+  async getOpenInterestBatch(
+    instIds: string[],
+    period: string = '1H',
+    delayMs: number = 600,
+    concurrency: number = 1,
+    onProgress?: (currentSymbol: string, processed: number) => void
+  ): Promise<Map<string, FetchedOIData[]>> {
+    const results = new Map<string, FetchedOIData[]>();
+
+    logger.info(`Fetching open interest data for ${instIds.length} assets from OKX`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      instIds,
+      async (instId) => {
+        try {
+          logger.info(`[API] Fetching OI ${instId} from OKX...`);
+          const data = await this.getOpenInterest(instId, period);
+          results.set(instId, data);
+          logger.info(`[API] ✓ ${instId}: ${data.length} OI records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          logger.error(`[API] ✗ ${instId}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch open interest for ${instId}`, errorMsg);
+          results.set(instId, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(instId, processed);
+          }
+        }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
+
+    const totalRecords = Array.from(results.values()).reduce(
+      (sum, data) => sum + data.length,
+      0
+    );
+    logger.info(`Fetched total of ${totalRecords} open interest records from OKX`);
 
     return results;
   }

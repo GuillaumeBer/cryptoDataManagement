@@ -19,6 +19,7 @@ export interface UnifiedAsset {
   coingecko_name: string | null;
   coingecko_symbol: string | null;
   market_cap_usd: number | null;
+  market_cap_rank: number | null;
   created_at: string;
   updated_at: string;
   platform_count: number;
@@ -51,6 +52,19 @@ export interface OHLCVRecord {
   volume: number | null;
   quote_volume: number | null;
   trades_count: number | null;
+  platform: string;
+  fetched_at: string;
+  asset_symbol: string;
+  asset_name: string | null;
+}
+
+export interface OpenInterestRecord {
+  id: number;
+  asset_id: number;
+  timestamp: string;
+  timeframe: string;
+  open_interest: number;
+  open_interest_value: number | null;
   platform: string;
   fetched_at: string;
   asset_symbol: string;

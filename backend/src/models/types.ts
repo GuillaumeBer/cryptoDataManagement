@@ -133,6 +133,7 @@ export interface UnifiedAsset {
   coingecko_name: string | null;
   coingecko_symbol: string | null;
   market_cap_usd: number | null;
+  market_cap_rank: number | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -158,6 +159,7 @@ export interface CreateUnifiedAssetParams {
   coingecko_name?: string;
   coingecko_symbol?: string;
   market_cap_usd?: number | null;
+  market_cap_rank?: number | null;
 }
 
 export interface CreateAssetMappingParams {
@@ -175,4 +177,41 @@ export interface UnifiedAssetWithMappings extends UnifiedAsset {
     asset_symbol: string;
     asset_platform: string;
   }>;
+}
+
+// Open Interest types
+export interface OpenInterest {
+  id: number;
+  asset_id: number;
+  timestamp: Date;
+  timeframe: string; // '1h', '4h', '1d', etc.
+  open_interest: string;
+  open_interest_value: string | null;
+  platform: string;
+  fetched_at: Date;
+}
+
+export interface CreateOpenInterestParams {
+  asset_id: number;
+  timestamp: Date;
+  timeframe: string;
+  open_interest: string;
+  open_interest_value?: string;
+  platform: string;
+}
+
+export interface OpenInterestQuery {
+  asset?: string;
+  assetId?: number;
+  startDate?: Date;
+  endDate?: Date;
+  platform?: string;
+  timeframe?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface OpenInterestWithAsset extends OpenInterest {
+  asset_symbol: string;
+  asset_name: string | null;
 }

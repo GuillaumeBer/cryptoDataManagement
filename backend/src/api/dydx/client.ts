@@ -8,6 +8,7 @@ import {
   FetchedFundingData,
   DyDxCandlesResponse,
   FetchedOHLCVData,
+  FetchedOIData,
 } from './types';
 
 /**
@@ -345,6 +346,106 @@ export class DyDxClient {
       0
     );
     logger.info(`Fetched total of ${totalRecords} OHLCV records from DyDx`);
+
+    return results;
+  }
+
+  /**
+   * Fetch open interest history for a specific market
+   *
+   * Note: DyDx V4 provides OI data embedded in candle responses via `startingOpenInterest`
+   * This method fetches candles and extracts the OI data
+   *
+   * Endpoint: GET /v4/candles/perpetualMarkets/{ticker}
+   */
+  async getOpenInterest(ticker: string, resolution: string = '1HOUR'): Promise<FetchedOIData[]> {
+    try {
+      logger.debug(`Fetching open interest for ${ticker} from DyDx`);
+
+      // Calculate time range: 480 hours ago to match funding rate and OHLCV depth
+      const hoursAgo = 480;
+      const fromISO = new Date(Date.now() - (hoursAgo * 60 * 60 * 1000)).toISOString();
+      const toISO = new Date().toISOString();
+
+      const response = await this.client.get<DyDxCandlesResponse>(`/candles/perpetualMarkets/${ticker}`, {
+        params: {
+          resolution,
+          fromISO,
+          toISO,
+          limit: 500, // Fetch sufficient data
+        },
+      });
+
+      const candles = response.data.candles;
+      if (!candles || !Array.isArray(candles)) {
+        logger.warn(`No candle data found for ${ticker}`);
+        return [];
+      }
+
+      const results: FetchedOIData[] = candles.map((candle) => ({
+        asset: ticker,
+        timestamp: new Date(candle.startedAt),
+        openInterest: candle.startingOpenInterest,
+        openInterestValue: undefined, // DyDx doesn't provide OI value separately
+      }));
+
+      logger.debug(`Fetched ${results.length} open interest records for ${ticker}`);
+      return results;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch open interest for ${ticker}: ${errorMsg}`);
+      throw new Error(`Failed to fetch open interest for ${ticker}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch open interest for multiple markets with rate limiting
+   *
+   * DyDx Rate Limits:
+   * - Same endpoint as OHLCV, use conservative delay
+   */
+  async getOpenInterestBatch(
+    tickers: string[],
+    resolution: string = '1HOUR',
+    delayMs: number = 500,
+    concurrency: number = 1,
+    onProgress?: (currentSymbol: string, processed: number) => void
+  ): Promise<Map<string, FetchedOIData[]>> {
+    const results = new Map<string, FetchedOIData[]>();
+
+    logger.info(`Fetching open interest data for ${tickers.length} assets from DyDx`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      tickers,
+      async (ticker) => {
+        try {
+          logger.info(`[API] Fetching OI ${ticker} from DyDx...`);
+          const data = await this.getOpenInterest(ticker, resolution);
+          results.set(ticker, data);
+          logger.info(`[API] ✓ ${ticker}: ${data.length} OI records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          logger.error(`[API] ✗ ${ticker}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch open interest for ${ticker}`, errorMsg);
+          results.set(ticker, []);
+        } finally {
+          processed++;
+          if (onProgress) {
+            onProgress(ticker, processed);
+          }
+        }
+      },
+      { concurrency: safeConcurrency, delayMs }
+    );
+
+    const totalRecords = Array.from(results.values()).reduce(
+      (sum, data) => sum + data.length,
+      0
+    );
+    logger.info(`Fetched total of ${totalRecords} open interest records from DyDx`);
 
     return results;
   }

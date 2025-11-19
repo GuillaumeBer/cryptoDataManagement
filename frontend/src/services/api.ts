@@ -8,6 +8,7 @@ import type {
   FetchLog,
   ApiResponse,
   OHLCVRecord,
+  OpenInterestRecord,
 } from '../types';
 
 class ApiClient {
@@ -102,6 +103,31 @@ class ApiClient {
     }
 
     const response = await this.client.get<ApiResponse<OHLCVRecord[]>>('/ohlcv', {
+      params: queryParams,
+    });
+    return response.data.data ?? [];
+  }
+
+  // Open Interest endpoints
+  async getOpenInterest(params: {
+    asset?: string;
+    platform?: string;
+    timeframe?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+    offset?: number;
+  }): Promise<OpenInterestRecord[]> {
+    const queryParams: Record<string, any> = { ...params };
+
+    if (queryParams.startDate) {
+      queryParams.startDate = queryParams.startDate.toISOString();
+    }
+    if (queryParams.endDate) {
+      queryParams.endDate = queryParams.endDate.toISOString();
+    }
+
+    const response = await this.client.get<ApiResponse<OpenInterestRecord[]>>('/open-interest', {
       params: queryParams,
     });
     return response.data.data ?? [];

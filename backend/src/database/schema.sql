@@ -59,6 +59,26 @@ CREATE INDEX IF NOT EXISTS idx_ohlcv_asset_time ON ohlcv_data(asset_id, timestam
 CREATE INDEX IF NOT EXISTS idx_ohlcv_timeframe ON ohlcv_data(timeframe);
 CREATE INDEX IF NOT EXISTS idx_ohlcv_platform_timeframe ON ohlcv_data(platform, timeframe);
 
+-- Open Interest data table: stores open interest (OI) data at various timeframes
+CREATE TABLE IF NOT EXISTS open_interest_data (
+  id SERIAL PRIMARY KEY,
+  asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+  timestamp TIMESTAMP NOT NULL,
+  timeframe VARCHAR(10) NOT NULL, -- '1h', '4h', '1d', etc.
+  open_interest DECIMAL(30, 10) NOT NULL, -- Number of contracts
+  open_interest_value DECIMAL(30, 10), -- USD value (if available)
+  platform VARCHAR(50) NOT NULL,
+  fetched_at TIMESTAMP DEFAULT NOW(),
+  CONSTRAINT unique_open_interest UNIQUE(asset_id, timestamp, platform, timeframe)
+);
+
+-- Indexes for Open Interest data for faster queries
+CREATE INDEX IF NOT EXISTS idx_oi_asset_id ON open_interest_data(asset_id);
+CREATE INDEX IF NOT EXISTS idx_oi_timestamp ON open_interest_data(timestamp);
+CREATE INDEX IF NOT EXISTS idx_oi_asset_time ON open_interest_data(asset_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_oi_timeframe ON open_interest_data(timeframe);
+CREATE INDEX IF NOT EXISTS idx_oi_platform_timeframe ON open_interest_data(platform, timeframe);
+
 -- Fetch logs table: tracks data fetch operations
 CREATE TABLE IF NOT EXISTS fetch_logs (
   id SERIAL PRIMARY KEY,

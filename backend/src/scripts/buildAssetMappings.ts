@@ -22,6 +22,7 @@ export class AssetMappingBuilder {
   private assetMappingRepo: AssetMappingRepository;
   private coingeckoClient: CoinGeckoClient;
   private correlationService: AssetCorrelationService;
+  private marketDataCache: Map<string, number> | null = null;
 
   constructor() {
     this.assetRepo = new AssetRepository();
@@ -118,14 +119,26 @@ export class AssetMappingBuilder {
           `Matched to CoinGecko: ${coingeckoCoin.name} (${coingeckoCoin.id})`
         );
 
-        // Fetch market cap from CoinGecko
+        // Fetch market cap from CoinGecko (fetch top 1000 coins across 4 pages)
         let marketCap: number | null = null;
         try {
-          const marketData = await this.coingeckoClient.getMarketData(250, 1);
-          const coinMarketData = marketData.find(m => m.id === coingeckoCoin.id);
-          if (coinMarketData) {
-            marketCap = coinMarketData.market_cap;
+          // Build market data cache if not already built
+          if (!this.marketDataCache) {
+            this.marketDataCache = new Map<string, number>();
+            for (let page = 1; page <= 4; page++) {
+              const marketData = await this.coingeckoClient.getMarketData(250, page);
+              for (const coin of marketData) {
+                this.marketDataCache.set(coin.id, coin.market_cap);
+              }
+            }
+            logger.info(`Loaded ${this.marketDataCache.size} coins market data from CoinGecko`);
+          }
+
+          marketCap = this.marketDataCache.get(coingeckoCoin.id) || null;
+          if (marketCap) {
             logger.info(`Market cap for ${coingeckoCoin.name}: $${marketCap.toLocaleString()}`);
+          } else {
+            logger.warn(`Market cap not found for ${coingeckoCoin.name} (not in top 1000)`);
           }
         } catch (error) {
           logger.warn(`Could not fetch market cap for ${coingeckoCoin.name}:`, error);
@@ -218,7 +231,7 @@ export class AssetMappingBuilder {
             asset_id: asset.id,
             confidence_score: confidence,
             mapping_method: method,
-            price_correlation: avgCorrelation,
+            price_correlation: avgCorrelation ?? undefined,
             last_validated_at:
               avgCorrelation !== null ? new Date() : undefined,
           });
