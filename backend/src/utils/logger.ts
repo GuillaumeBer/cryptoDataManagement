@@ -73,4 +73,31 @@ if (process.env.NODE_ENV === 'production') {
   );
 }
 
+/**
+ * Attach a temporary file transport for fetch operations.
+ * Captures only 'warn' and 'error' levels.
+ * @param filename The path to the log file
+ * @returns The created transport instance
+ */
+export const attachFetchLogTransport = (filename: string): winston.transport => {
+  const transport = new winston.transports.File({
+    filename,
+    level: 'warn', // Capture warning and error levels
+    format: winston.format.combine(
+      winston.format.timestamp(),
+      winston.format.json()
+    ),
+  });
+  logger.add(transport);
+  return transport;
+};
+
+/**
+ * Remove the temporary file transport.
+ * @param transport The transport instance to remove
+ */
+export const detachFetchLogTransport = (transport: winston.transport) => {
+  logger.remove(transport);
+};
+
 export default logger;

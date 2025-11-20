@@ -17,7 +17,8 @@ import {
   PlatformAssetPayload,
   isSupportedPlatform,
 } from './normalizers/platformAssetNormalizer';
-import { logger } from '../utils/logger';
+import { logger, attachFetchLogTransport, detachFetchLogTransport } from '../utils/logger';
+import winston from 'winston';
 
 interface FundingHistoryRecord {
   asset: string;
@@ -670,6 +671,18 @@ export class DataFetcherService extends EventEmitter {
     this.isInitialFetchInProgress = true;
     logger.info(`Starting initial data fetch from ${this.platform}`);
 
+    // Attach fetch-specific log file
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const logFilename = `logs/fetch-${this.platform}-${timestamp}-initial.log`;
+    let transport: winston.transport | null = null;
+
+    try {
+      transport = attachFetchLogTransport(logFilename);
+      logger.info(`Logging fetch warnings/errors to ${logFilename}`);
+    } catch (error) {
+      logger.error('Failed to attach fetch log transport', error);
+    }
+
     const fetchLog = await FetchLogRepository.create(this.platform, 'initial');
     let assetsProcessed = 0;
     let recordsFetched = 0;
@@ -1228,6 +1241,10 @@ export class DataFetcherService extends EventEmitter {
       );
       throw new Error(errorMsg);
     } finally {
+      // Detach log transport
+      if (transport) {
+        detachFetchLogTransport(transport);
+      }
       // Always clear the in-progress flag and current progress
       this.isInitialFetchInProgress = false;
       this.currentProgress = null;
@@ -1254,6 +1271,18 @@ export class DataFetcherService extends EventEmitter {
 
     this.isIncrementalFetchInProgress = true;
     logger.info(`Starting incremental data fetch from ${this.platform}`);
+
+    // Attach fetch-specific log file
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const logFilename = `logs/fetch-${this.platform}-${timestamp}-incremental.log`;
+    let transport: winston.transport | null = null;
+
+    try {
+      transport = attachFetchLogTransport(logFilename);
+      logger.info(`Logging fetch warnings/errors to ${logFilename}`);
+    } catch (error) {
+      logger.error('Failed to attach fetch log transport', error);
+    }
 
     const fetchLog = await FetchLogRepository.create(this.platform, 'incremental');
     let assetsProcessed = 0;
@@ -1817,6 +1846,10 @@ export class DataFetcherService extends EventEmitter {
       );
       throw new Error(errorMsg);
     } finally {
+      // Detach log transport
+      if (transport) {
+        detachFetchLogTransport(transport);
+      }
       // Always clear the in-progress flag and current progress
       this.isIncrementalFetchInProgress = false;
       this.currentProgress = null;
