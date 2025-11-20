@@ -29,6 +29,7 @@ import {
 export class DyDxClient {
   private client: AxiosInstance;
   private baseURL: string;
+  private isBanned: boolean = false;
 
   constructor() {
     // DyDx V4 Indexer API base URL
@@ -42,6 +43,61 @@ export class DyDxClient {
     });
 
     logger.info('DyDx V4 Indexer API client initialized', { baseURL: this.baseURL });
+  }
+
+  /**
+   * Check if IP is currently banned
+   */
+  public isBannedStatus(): boolean {
+    return this.isBanned;
+  }
+
+  /**
+   * Wrapper for axios requests with retry logic on rate limits
+   * - Retries on HTTP 429 (rate limited) with exponential backoff
+   * - Throws IP_BANNED error on HTTP 418 or 403 (IP banned)
+   */
+  private async requestWithRetry<T>(
+    method: 'get' | 'post',
+    url: string,
+    config?: any,
+    maxRetries: number = 3
+  ): Promise<T> {
+    let lastError: any;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = method === 'get'
+          ? await this.client.get<T>(url, config)
+          : await this.client.post<T>(url, config);
+        return response.data;
+      } catch (error: any) {
+        if (axios.isAxiosError(error)) {
+          const status = error.response?.status;
+
+          // HTTP 418 or 403: IP banned - stop immediately
+          if (status === 418 || status === 403) {
+            this.isBanned = true;
+            const banMsg = this.getErrorMessage(error);
+            logger.error(`IP BANNED by DyDx: ${banMsg}`);
+            throw new Error(`IP_BANNED: ${banMsg}`);
+          }
+
+          // HTTP 429: Rate limited - retry with exponential backoff
+          if (status === 429 && attempt < maxRetries) {
+            const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+            logger.warn(`Rate limited on ${url}, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            continue;
+          }
+        }
+
+        lastError = error;
+      }
+    }
+
+    // All retries exhausted
+    throw lastError;
   }
 
   /**
@@ -71,10 +127,10 @@ export class DyDxClient {
     try {
       logger.info('Fetching perpetual markets from DyDx V4');
 
-      const response = await this.client.get<DyDxMarketsResponse>('/perpetualMarkets');
+      const data = await this.requestWithRetry<DyDxMarketsResponse>('get', '/perpetualMarkets');
 
       // DyDx returns markets as an object with ticker as key
-      const markets = Object.values(response.data.markets);
+      const markets = Object.values(data.markets);
 
       // Filter for active markets only
       const activeMarkets = markets.filter(
@@ -127,14 +183,14 @@ export class DyDxClient {
 
       // Fetch up to 100 records at a time until we have enough or no more data
       while (hasMore && allResults.length < 480) {
-        const response = await this.client.get<DyDxHistoricalFundingResponse>(`/historicalFunding/${ticker}`, {
+        const data = await this.requestWithRetry<DyDxHistoricalFundingResponse>('get', `/historicalFunding/${ticker}`, {
           params: {
             effectiveBeforeOrAt,
             limit: 100,
           },
         });
 
-        const fundingData = response.data.historicalFunding;
+        const fundingData = data.historicalFunding;
         if (!fundingData || !Array.isArray(fundingData) || fundingData.length === 0) {
           logger.debug(`No more funding data found for ${ticker}`);
           hasMore = false;
@@ -213,6 +269,12 @@ export class DyDxClient {
     await runPromisePool(
       tickers,
       async (ticker) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${ticker} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching ${ticker} from DyDx V4...`);
           const data = await this.getFundingHistory(ticker);
@@ -226,6 +288,14 @@ export class DyDxClient {
           logger.info(`[API] ✓ ${ticker}: ${data.length} records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${ticker}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by DyDx`, errorMsg);
+            return; // Stop processing this and future symbols
+          }
+
           logger.error(`[API] ✗ ${ticker}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch funding history for ${ticker}`, errorMsg);
 
@@ -272,7 +342,7 @@ export class DyDxClient {
       const fromISO = new Date(Date.now() - (hoursAgo * 60 * 60 * 1000)).toISOString();
       const toISO = new Date().toISOString();
 
-      const response = await this.client.get<DyDxCandlesResponse>(`/candles/perpetualMarkets/${symbol}`, {
+      const data = await this.requestWithRetry<DyDxCandlesResponse>('get', `/candles/perpetualMarkets/${symbol}`, {
         params: {
           resolution,
           fromISO,
@@ -281,7 +351,7 @@ export class DyDxClient {
         },
       });
 
-      const candles = response.data.candles;
+      const candles = data.candles;
       if (!candles || !Array.isArray(candles)) {
         logger.warn(`No OHLCV data found for ${symbol}`);
         return [];
@@ -334,6 +404,12 @@ export class DyDxClient {
     await runPromisePool(
       symbols,
       async (symbol) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${symbol} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching OHLCV ${symbol} from DyDx...`);
           const data = await this.getOHLCV(symbol, resolution);
@@ -347,6 +423,14 @@ export class DyDxClient {
           logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${symbol}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by DyDx`, errorMsg);
+            return;
+          }
+
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
           if (!onItemFetched) {
@@ -384,8 +468,8 @@ export class DyDxClient {
       logger.debug(`Fetching open interest for ${ticker} from DyDx`);
 
       // Fetch market info to get contract specifications (stepSize)
-      const marketsResponse = await this.client.get<DyDxMarketsResponse>('/perpetualMarkets');
-      const marketInfo = marketsResponse.data.markets[ticker];
+      const marketsData = await this.requestWithRetry<DyDxMarketsResponse>('get', '/perpetualMarkets');
+      const marketInfo = marketsData.markets[ticker];
 
       if (!marketInfo) {
         logger.warn(`Market info not found for ${ticker}`);
@@ -400,7 +484,7 @@ export class DyDxClient {
       const fromISO = new Date(Date.now() - (hoursAgo * 60 * 60 * 1000)).toISOString();
       const toISO = new Date().toISOString();
 
-      const response = await this.client.get<DyDxCandlesResponse>(`/candles/perpetualMarkets/${ticker}`, {
+      const data = await this.requestWithRetry<DyDxCandlesResponse>('get', `/candles/perpetualMarkets/${ticker}`, {
         params: {
           resolution,
           fromISO,
@@ -409,7 +493,7 @@ export class DyDxClient {
         },
       });
 
-      const candles = response.data.candles;
+      const candles = data.candles;
       if (!candles || !Array.isArray(candles)) {
         logger.warn(`No candle data found for ${ticker}`);
         return [];
@@ -453,7 +537,7 @@ export class DyDxClient {
     const fromISO = new Date(Date.now() - (hoursAgo * 60 * 60 * 1000)).toISOString();
     const toISO = new Date().toISOString();
 
-    const response = await this.client.get<DyDxCandlesResponse>(`/candles/perpetualMarkets/${ticker}`, {
+    const data = await this.requestWithRetry<DyDxCandlesResponse>('get', `/candles/perpetualMarkets/${ticker}`, {
       params: {
         resolution,
         fromISO,
@@ -462,7 +546,7 @@ export class DyDxClient {
       },
     });
 
-    const candles = response.data.candles;
+    const candles = data.candles;
     if (!candles || !Array.isArray(candles)) {
       logger.warn(`No candle data found for ${ticker}`);
       return [];
@@ -510,8 +594,8 @@ export class DyDxClient {
 
     // Fetch market info once for all tickers (optimization)
     logger.info('Fetching market info for contract sizes...');
-    const marketsResponse = await this.client.get<DyDxMarketsResponse>('/perpetualMarkets');
-    const markets = marketsResponse.data.markets;
+    const marketsData = await this.requestWithRetry<DyDxMarketsResponse>('get', '/perpetualMarkets');
+    const markets = marketsData.markets;
 
     let processed = 0;
     const safeConcurrency = Math.max(1, concurrency);
@@ -519,6 +603,12 @@ export class DyDxClient {
     await runPromisePool(
       tickers,
       async (ticker) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${ticker} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching OI ${ticker} from DyDx...`);
 
@@ -547,6 +637,14 @@ export class DyDxClient {
           logger.info(`[API] ✓ ${ticker}: ${data.length} OI records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${ticker}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by DyDx`, errorMsg);
+            return;
+          }
+
           logger.error(`[API] ✗ ${ticker}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch open interest for ${ticker}`, errorMsg);
           if (!onItemFetched) {

@@ -16,6 +16,7 @@ import {
 export class BinanceClient {
   private client: AxiosInstance;
   private baseURL: string;
+  private isBanned: boolean = false;
 
   constructor() {
     // Binance Futures API base URL
@@ -29,6 +30,61 @@ export class BinanceClient {
     });
 
     logger.info('Binance Futures API client initialized', { baseURL: this.baseURL });
+  }
+
+  /**
+   * Check if IP is currently banned
+   */
+  public isBannedStatus(): boolean {
+    return this.isBanned;
+  }
+
+  /**
+   * Wrapper for axios requests with retry logic on rate limits
+   * - Retries on HTTP 429 (rate limited) with exponential backoff
+   * - Throws IpBannedError on HTTP 418 (IP banned)
+   */
+  private async requestWithRetry<T>(
+    method: 'get' | 'post',
+    url: string,
+    config?: any,
+    maxRetries: number = 3
+  ): Promise<T> {
+    let lastError: any;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = method === 'get'
+          ? await this.client.get<T>(url, config)
+          : await this.client.post<T>(url, config);
+        return response.data;
+      } catch (error: any) {
+        if (axios.isAxiosError(error)) {
+          const status = error.response?.status;
+
+          // HTTP 418: IP banned - stop immediately
+          if (status === 418) {
+            this.isBanned = true;
+            const banMsg = this.getErrorMessage(error);
+            logger.error(`IP BANNED by Binance: ${banMsg}`);
+            throw new Error(`IP_BANNED: ${banMsg}`);
+          }
+
+          // HTTP 429: Rate limited - retry with exponential backoff
+          if (status === 429 && attempt < maxRetries) {
+            const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+            logger.warn(`Rate limited on ${url}, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            continue;
+          }
+        }
+
+        lastError = error;
+      }
+    }
+
+    // All retries exhausted
+    throw lastError;
   }
 
   /**
@@ -63,10 +119,10 @@ export class BinanceClient {
     try {
       logger.info('Fetching assets from Binance Futures');
 
-      const response = await this.client.get<BinanceExchangeInfo>('/fapi/v1/exchangeInfo');
+      const data = await this.requestWithRetry<BinanceExchangeInfo>('get', '/fapi/v1/exchangeInfo');
 
       // Filter for PERPETUAL contracts that are actively trading
-      const assets = response.data.symbols.filter(
+      const assets = data.symbols.filter(
         (s) => s.contractType === 'PERPETUAL' && s.status === 'TRADING'
       );
 
@@ -106,7 +162,7 @@ export class BinanceClient {
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
       const endTime = Date.now();
 
-      const response = await this.client.get<BinanceFundingRate[]>('/fapi/v1/fundingRate', {
+      const fundingData = await this.requestWithRetry<BinanceFundingRate[]>('get', '/fapi/v1/fundingRate', {
         params: {
           symbol,
           startTime,
@@ -115,7 +171,6 @@ export class BinanceClient {
         },
       });
 
-      const fundingData = response.data;
       if (!fundingData || !Array.isArray(fundingData)) {
         logger.warn(`No funding data found for ${symbol}`);
         return [];
@@ -167,6 +222,12 @@ export class BinanceClient {
     await runPromisePool(
       symbols,
       async (symbol) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${symbol} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching ${symbol} from Binance...`);
           const data = await this.getFundingHistory(symbol);
@@ -180,6 +241,14 @@ export class BinanceClient {
           logger.info(`[API] ✓ ${symbol}: ${data.length} records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${symbol}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by Binance`, errorMsg);
+            return; // Stop processing this and future symbols
+          }
+
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch funding history for ${symbol}`, errorMsg);
           if (!onItemFetched) {
@@ -226,7 +295,7 @@ export class BinanceClient {
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
       const endTime = Date.now();
 
-      const response = await this.client.get<BinanceKline[]>('/fapi/v1/klines', {
+      const klines = await this.requestWithRetry<BinanceKline[]>('get', '/fapi/v1/klines', {
         params: {
           symbol,
           interval,
@@ -236,7 +305,6 @@ export class BinanceClient {
         },
       });
 
-      const klines = response.data;
       if (!klines || !Array.isArray(klines)) {
         logger.warn(`No OHLCV data found for ${symbol}`);
         return [];
@@ -292,6 +360,12 @@ export class BinanceClient {
     await runPromisePool(
       symbols,
       async (symbol) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${symbol} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching OHLCV ${symbol} from Binance...`);
           const data = await this.getOHLCV(symbol, interval);
@@ -305,6 +379,14 @@ export class BinanceClient {
           logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${symbol}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by Binance`, errorMsg);
+            return;
+          }
+
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
           if (!onItemFetched) {
@@ -351,7 +433,8 @@ export class BinanceClient {
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
       const endTime = Date.now();
 
-      const response = await this.client.get<BinanceOpenInterest[]>(
+      const oiData = await this.requestWithRetry<BinanceOpenInterest[]>(
+        'get',
         '/futures/data/openInterestHist',
         {
           params: {
@@ -365,7 +448,6 @@ export class BinanceClient {
         }
       );
 
-      const oiData = response.data;
       if (!oiData || !Array.isArray(oiData)) {
         logger.warn(`No open interest data found for ${symbol}`);
         return [];
@@ -422,6 +504,12 @@ export class BinanceClient {
     await runPromisePool(
       symbols,
       async (symbol) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${symbol} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching OI ${symbol} from Binance...`);
           const data = await this.getOpenInterest(symbol, period);
@@ -439,6 +527,14 @@ export class BinanceClient {
           }
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${symbol}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by Binance`, errorMsg);
+            return;
+          }
+
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch open interest for ${symbol}`, errorMsg);
           if (!onItemFetched) {

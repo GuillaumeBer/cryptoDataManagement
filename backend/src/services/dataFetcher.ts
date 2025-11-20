@@ -18,6 +18,7 @@ import {
   isSupportedPlatform,
 } from './normalizers/platformAssetNormalizer';
 import { logger, attachFetchLogTransport, detachFetchLogTransport } from '../utils/logger';
+import { RateLimiter } from '../utils/rateLimiter';
 import winston from 'winston';
 
 interface FundingHistoryRecord {
@@ -385,8 +386,8 @@ export class DataFetcherService extends EventEmitter {
         // Conservative
         return { capacity: 600, interval: 60000 };
       case 'aster':
-        // Conservative
-        return { capacity: 1200, interval: 60000 };
+        // Very conservative due to strict rate limiting
+        return { capacity: 600, interval: 60000 };
       default:
         return { capacity: 600, interval: 60000 };
     }
@@ -444,12 +445,13 @@ export class DataFetcherService extends EventEmitter {
       case 'hyperliquid':
         return 5;
       case 'binance':
-        return 10;
+        return 2;
       case 'bybit':
-        return 20;
+        return 10;
       case 'okx':
-        return 5;
+        return 2;
       case 'dydx':
+        return 1;
       case 'aster':
         return 2;
       default:

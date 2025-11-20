@@ -31,6 +31,7 @@ import {
 export class BybitClient {
   private client: AxiosInstance;
   private baseURL: string;
+  private isBanned: boolean = false;
 
   constructor() {
     // Bybit V5 API base URL
@@ -44,6 +45,61 @@ export class BybitClient {
     });
 
     logger.info('Bybit V5 API client initialized', { baseURL: this.baseURL });
+  }
+
+  /**
+   * Check if IP is currently banned
+   */
+  public isBannedStatus(): boolean {
+    return this.isBanned;
+  }
+
+  /**
+   * Wrapper for axios requests with retry logic on rate limits
+   * - Retries on HTTP 429 (rate limited) with exponential backoff
+   * - Throws IpBannedError on HTTP 418 or 403 (IP banned)
+   */
+  private async requestWithRetry<T>(
+    method: 'get' | 'post',
+    url: string,
+    config?: any,
+    maxRetries: number = 3
+  ): Promise<T> {
+    let lastError: any;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = method === 'get'
+          ? await this.client.get<T>(url, config)
+          : await this.client.post<T>(url, config);
+        return response.data;
+      } catch (error: any) {
+        if (axios.isAxiosError(error)) {
+          const status = error.response?.status;
+
+          // HTTP 418 or 403: IP banned - stop immediately
+          if (status === 418 || status === 403) {
+            this.isBanned = true;
+            const banMsg = this.getErrorMessage(error);
+            logger.error(`IP BANNED by Bybit: ${banMsg}`);
+            throw new Error(`IP_BANNED: ${banMsg}`);
+          }
+
+          // HTTP 429: Rate limited - retry with exponential backoff
+          if (status === 429 && attempt < maxRetries) {
+            const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+            logger.warn(`Rate limited on ${url}, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            continue;
+          }
+        }
+
+        lastError = error;
+      }
+    }
+
+    // All retries exhausted
+    throw lastError;
   }
 
   /**
@@ -78,7 +134,7 @@ export class BybitClient {
     try {
       logger.info('Fetching perpetual contracts from Bybit');
 
-      const response = await this.client.get<BybitInstrumentsResponse>('/v5/market/instruments-info', {
+      const data = await this.requestWithRetry<BybitInstrumentsResponse>('get', '/v5/market/instruments-info', {
         params: {
           category: 'linear', // USDT perpetual contracts
           limit: 1000, // Get as many as possible in one request
@@ -86,12 +142,12 @@ export class BybitClient {
       });
 
       // Check if request was successful
-      if (response.data.retCode !== 0) {
-        throw new Error(`Bybit API error: ${response.data.retMsg}`);
+      if (data.retCode !== 0) {
+        throw new Error(`Bybit API error: ${data.retMsg}`);
       }
 
       // Filter for active trading contracts and perpetuals only
-      const assets = response.data.result.list.filter(
+      const assets = data.result.list.filter(
         (instrument) =>
           instrument.status === 'Trading' &&
           instrument.contractType === 'LinearPerpetual'
@@ -138,7 +194,7 @@ export class BybitClient {
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
       const endTime = Date.now();
 
-      const response = await this.client.get<BybitFundingRateHistoryResponse>('/v5/market/funding/history', {
+      const data = await this.requestWithRetry<BybitFundingRateHistoryResponse>('get', '/v5/market/funding/history', {
         params: {
           category: 'linear',
           symbol,
@@ -149,11 +205,11 @@ export class BybitClient {
       });
 
       // Check if request was successful
-      if (response.data.retCode !== 0) {
-        throw new Error(`Bybit API error: ${response.data.retMsg}`);
+      if (data.retCode !== 0) {
+        throw new Error(`Bybit API error: ${data.retMsg}`);
       }
 
-      const fundingData = response.data.result.list;
+      const fundingData = data.result.list;
       if (!fundingData || !Array.isArray(fundingData)) {
         logger.warn(`No funding data found for ${symbol}`);
         return [];
@@ -207,6 +263,12 @@ export class BybitClient {
     await runPromisePool(
       symbols,
       async (symbol) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${symbol} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching ${symbol} from Bybit...`);
           const data = await this.getFundingHistory(symbol);
@@ -220,6 +282,14 @@ export class BybitClient {
           logger.info(`[API] ✓ ${symbol}: ${data.length} records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${symbol}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by Bybit`, errorMsg);
+            return; // Stop processing this and future symbols
+          }
+
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch funding history for ${symbol}`, errorMsg);
 
@@ -266,7 +336,7 @@ export class BybitClient {
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
       const endTime = Date.now();
 
-      const response = await this.client.get<BybitKlineResponse>('/v5/market/kline', {
+      const data = await this.requestWithRetry<BybitKlineResponse>('get', '/v5/market/kline', {
         params: {
           category: 'linear',
           symbol,
@@ -278,11 +348,11 @@ export class BybitClient {
       });
 
       // Check if request was successful
-      if (response.data.retCode !== 0) {
-        throw new Error(`Bybit API error: ${response.data.retMsg}`);
+      if (data.retCode !== 0) {
+        throw new Error(`Bybit API error: ${data.retMsg}`);
       }
 
-      const klines = response.data.result.list;
+      const klines = data.result.list;
       if (!klines || !Array.isArray(klines)) {
         logger.warn(`No OHLCV data found for ${symbol}`);
         return [];
@@ -335,6 +405,12 @@ export class BybitClient {
     await runPromisePool(
       symbols,
       async (symbol) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${symbol} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching OHLCV ${symbol} from Bybit...`);
           const data = await this.getOHLCV(symbol, interval);
@@ -348,6 +424,14 @@ export class BybitClient {
           logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${symbol}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by Bybit`, errorMsg);
+            return;
+          }
+
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
           if (!onItemFetched) {
@@ -453,7 +537,7 @@ export class BybitClient {
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
       const endTime = Date.now();
 
-      const response = await this.client.get<BybitOpenInterestResponse>('/v5/market/open-interest', {
+      const data = await this.requestWithRetry<BybitOpenInterestResponse>('get', '/v5/market/open-interest', {
         params: {
           category: 'linear',
           symbol,
@@ -465,11 +549,11 @@ export class BybitClient {
       });
 
       // Check if request was successful
-      if (response.data.retCode !== 0) {
-        throw new Error(`Bybit API error: ${response.data.retMsg}`);
+      if (data.retCode !== 0) {
+        throw new Error(`Bybit API error: ${data.retMsg}`);
       }
 
-      const oiData = response.data.result.list;
+      const oiData = data.result.list;
       if (!oiData || !Array.isArray(oiData)) {
         logger.warn(`No open interest data found for ${symbol}`);
         return [];
@@ -541,6 +625,12 @@ export class BybitClient {
     await runPromisePool(
       symbols,
       async (symbol) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${symbol} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching OI ${symbol} from Bybit...`);
           const ohlcvData = ohlcvDataMap?.get(symbol);
@@ -557,6 +647,14 @@ export class BybitClient {
           logger.info(`[API] ✓ ${symbol}: ${data.length} OI records${valueInfo}`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${symbol}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by Bybit`, errorMsg);
+            return;
+          }
+
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch open interest for ${symbol}`, errorMsg);
           if (!onItemFetched) {

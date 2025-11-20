@@ -16,6 +16,7 @@ import {
 export class HyperliquidClient {
   private client: AxiosInstance;
   private baseURL: string;
+  private isBanned: boolean = false;
 
   constructor() {
     this.baseURL = process.env.HYPERLIQUID_API_URL || 'https://api.hyperliquid.xyz';
@@ -28,6 +29,61 @@ export class HyperliquidClient {
     });
 
     logger.info('Hyperliquid API client initialized', { baseURL: this.baseURL });
+  }
+
+  /**
+   * Check if IP is currently banned
+   */
+  public isBannedStatus(): boolean {
+    return this.isBanned;
+  }
+
+  /**
+   * Wrapper for axios requests with retry logic on rate limits
+   * - Retries on HTTP 429 (rate limited) with exponential backoff
+   * - Throws IpBannedError on HTTP 418 or 403 (IP banned)
+   */
+  private async requestWithRetry<T>(
+    method: 'get' | 'post',
+    url: string,
+    config?: any,
+    maxRetries: number = 3
+  ): Promise<T> {
+    let lastError: any;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = method === 'get'
+          ? await this.client.get<T>(url, config)
+          : await this.client.post<T>(url, config);
+        return response.data;
+      } catch (error: any) {
+        if (axios.isAxiosError(error)) {
+          const status = error.response?.status;
+
+          // HTTP 418 or 403: IP banned - stop immediately
+          if (status === 418 || status === 403) {
+            this.isBanned = true;
+            const banMsg = this.getErrorMessage(error);
+            logger.error(`IP BANNED by Hyperliquid: ${banMsg}`);
+            throw new Error(`IP_BANNED: ${banMsg}`);
+          }
+
+          // HTTP 429: Rate limited - retry with exponential backoff
+          if (status === 429 && attempt < maxRetries) {
+            const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+            logger.warn(`Rate limited on ${url}, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            continue;
+          }
+        }
+
+        lastError = error;
+      }
+    }
+
+    // All retries exhausted
+    throw lastError;
   }
 
   /**
@@ -50,11 +106,11 @@ export class HyperliquidClient {
     try {
       logger.info('Fetching assets from Hyperliquid');
 
-      const response = await this.client.post<HyperliquidMetaResponse>('/info', {
+      const data = await this.requestWithRetry<HyperliquidMetaResponse>('post', '/info', {
         type: 'meta',
       });
 
-      const assets = response.data.universe.map((asset) => ({
+      const assets = data.universe.map((asset) => ({
         name: asset.name,
         maxLeverage: asset.maxLeverage,
       }));
@@ -62,8 +118,9 @@ export class HyperliquidClient {
       logger.info(`Fetched ${assets.length} assets from Hyperliquid`);
       return assets;
     } catch (error) {
-      logger.error('Failed to fetch assets from Hyperliquid', error);
-      throw new Error(`Failed to fetch assets: ${error}`);
+      const errorMsg = this.getErrorMessage(error);
+      logger.error('Failed to fetch assets from Hyperliquid', errorMsg);
+      throw new Error(`Failed to fetch assets: ${errorMsg}`);
     }
   }
 
@@ -79,13 +136,12 @@ export class HyperliquidClient {
       const hoursAgo = 480;
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
 
-      const response = await this.client.post<HyperliquidFundingHistoryResponse>('/info', {
+      const fundingData = await this.requestWithRetry<HyperliquidFundingHistoryResponse>('post', '/info', {
         type: 'fundingHistory',
         coin,
         startTime,
       });
 
-      const fundingData = response.data;
       if (!fundingData || !Array.isArray(fundingData)) {
         logger.warn(`No funding data found for ${coin}`);
         return [];
@@ -101,9 +157,9 @@ export class HyperliquidClient {
       logger.debug(`Fetched ${results.length} funding rate records for ${coin}`);
       return results;
     } catch (error: any) {
-      const errorDetails = error.response?.data ? JSON.stringify(error.response.data) : error.message;
-      logger.error(`Failed to fetch funding history for ${coin}: ${errorDetails}`);
-      throw new Error(`Failed to fetch funding history for ${coin}: ${errorDetails}`);
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch funding history for ${coin}: ${errorMsg}`);
+      throw new Error(`Failed to fetch funding history for ${coin}: ${errorMsg}`);
     }
   }
 
@@ -128,6 +184,12 @@ export class HyperliquidClient {
     await runPromisePool(
       coins,
       async (coin) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${coin} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching ${coin}...`);
           const data = await this.getFundingHistory(coin);
@@ -141,8 +203,17 @@ export class HyperliquidClient {
 
           logger.info(`[API] ✓ ${coin}: ${data.length} records`);
         } catch (error) {
-          logger.error(`[API] ✗ ${coin}: FAILED`);
-          logger.error(`Failed to fetch funding history for ${coin}`, error);
+          const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${coin}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by Hyperliquid`, errorMsg);
+            return; // Stop processing this and future symbols
+          }
+
+          logger.error(`[API] ✗ ${coin}: FAILED - ${errorMsg}`);
+          logger.error(`Failed to fetch funding history for ${coin}`, errorMsg);
           if (!onItemFetched) {
             results.set(coin, []);
           }
@@ -185,7 +256,7 @@ export class HyperliquidClient {
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
       const endTime = Date.now();
 
-      const response = await this.client.post<HyperliquidCandle[]>('/info', {
+      const candles = await this.requestWithRetry<HyperliquidCandle[]>('post', '/info', {
         type: 'candleSnapshot',
         req: {
           coin: symbol,
@@ -195,7 +266,6 @@ export class HyperliquidClient {
         },
       });
 
-      const candles = response.data;
       if (!candles || !Array.isArray(candles)) {
         logger.warn(`No OHLCV data found for ${symbol}`);
         return [];
@@ -247,6 +317,12 @@ export class HyperliquidClient {
     await runPromisePool(
       symbols,
       async (symbol) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${symbol} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching OHLCV ${symbol} from Hyperliquid...`);
           const data = await this.getOHLCV(symbol, interval);
@@ -260,6 +336,14 @@ export class HyperliquidClient {
           logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${symbol}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by Hyperliquid`, errorMsg);
+            return;
+          }
+
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
           if (!onItemFetched) {
@@ -298,13 +382,13 @@ export class HyperliquidClient {
     try {
       logger.debug('Fetching open interest snapshot from Hyperliquid');
 
-      const response = await this.client.post<HyperliquidMetaAndAssetCtxsResponse>('/info', {
+      const data = await this.requestWithRetry<HyperliquidMetaAndAssetCtxsResponse>('post', '/info', {
         type: 'metaAndAssetCtxs',
       });
 
       // Response is [{universe: [...], ...}, assetCtxs]
-      const meta = response.data[0];
-      const assetCtxs = response.data[1];
+      const meta = data[0];
+      const assetCtxs = data[1];
       const universe = meta?.universe;
 
       if (!assetCtxs || !Array.isArray(assetCtxs) || !universe || !Array.isArray(universe)) {
@@ -363,29 +447,49 @@ export class HyperliquidClient {
 
     logger.info(`Fetching open interest snapshot for ${coins.length} assets from Hyperliquid`);
 
-    // Get snapshot for all assets at once (Hyperliquid limitation)
-    const snapshot = await this.getOpenInterestSnapshot();
-
-    // Filter to requested coins and convert to array format
-    for (const coin of coins) {
-      const oiData = snapshot.get(coin);
-      let data: FetchedOIData[] = [];
-      if (oiData) {
-        data = [oiData];
-      }
-
-      if (onItemFetched) {
-        await onItemFetched(coin, data);
-      } else {
-        results.set(coin, data);
-      }
-
-      if (onProgress) {
-        onProgress(coin, results.size);
-      }
+    // Check if IP is banned before processing
+    if (this.isBanned) {
+      logger.warn(`[API] Skipping open interest fetch - IP is banned`);
+      return results;
     }
 
-    logger.info(`Fetched open interest snapshot for ${results.size} assets from Hyperliquid`);
+    try {
+      // Get snapshot for all assets at once (Hyperliquid limitation)
+      const snapshot = await this.getOpenInterestSnapshot();
+
+      // Filter to requested coins and convert to array format
+      for (const coin of coins) {
+        const oiData = snapshot.get(coin);
+        let data: FetchedOIData[] = [];
+        if (oiData) {
+          data = [oiData];
+        }
+
+        if (onItemFetched) {
+          await onItemFetched(coin, data);
+        } else {
+          results.set(coin, data);
+        }
+
+        if (onProgress) {
+          onProgress(coin, results.size);
+        }
+      }
+
+      logger.info(`Fetched open interest snapshot for ${results.size} assets from Hyperliquid`);
+    } catch (error) {
+      const errorMsg = this.getErrorMessage(error);
+
+      // Check if this is an IP ban error
+      if (errorMsg.includes('IP_BANNED')) {
+        logger.error(`[API] IP BANNED - stopping all fetches`);
+        logger.error(`IP banned by Hyperliquid`, errorMsg);
+        return results;
+      }
+
+      logger.error(`Failed to fetch open interest snapshot`, errorMsg);
+      throw error;
+    }
 
     return results;
   }

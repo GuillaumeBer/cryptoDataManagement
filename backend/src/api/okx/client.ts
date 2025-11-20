@@ -32,6 +32,7 @@ import {
 export class OKXClient {
   private client: AxiosInstance;
   private baseURL: string;
+  private isBanned: boolean = false;
 
   constructor() {
     // OKX V5 API base URL
@@ -45,6 +46,61 @@ export class OKXClient {
     });
 
     logger.info('OKX V5 API client initialized', { baseURL: this.baseURL });
+  }
+
+  /**
+   * Check if IP is currently banned
+   */
+  public isBannedStatus(): boolean {
+    return this.isBanned;
+  }
+
+  /**
+   * Wrapper for axios requests with retry logic on rate limits
+   * - Retries on HTTP 429 (rate limited) with exponential backoff
+   * - Throws Error on HTTP 418 or 403 (IP banned)
+   */
+  private async requestWithRetry<T>(
+    method: 'get' | 'post',
+    url: string,
+    config?: any,
+    maxRetries: number = 3
+  ): Promise<T> {
+    let lastError: any;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = method === 'get'
+          ? await this.client.get<T>(url, config)
+          : await this.client.post<T>(url, config);
+        return response.data;
+      } catch (error: any) {
+        if (axios.isAxiosError(error)) {
+          const status = error.response?.status;
+
+          // HTTP 418 or 403: IP banned - stop immediately
+          if (status === 418 || status === 403) {
+            this.isBanned = true;
+            const banMsg = this.getErrorMessage(error);
+            logger.error(`IP BANNED by OKX: ${banMsg}`);
+            throw new Error(`IP_BANNED: ${banMsg}`);
+          }
+
+          // HTTP 429: Rate limited - retry with exponential backoff
+          if (status === 429 && attempt < maxRetries) {
+            const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+            logger.warn(`Rate limited on ${url}, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            continue;
+          }
+        }
+
+        lastError = error;
+      }
+    }
+
+    // All retries exhausted
+    throw lastError;
   }
 
   /**
@@ -77,19 +133,19 @@ export class OKXClient {
     try {
       logger.info('Fetching perpetual swaps from OKX');
 
-      const response = await this.client.get<OKXInstrumentsResponse>('/api/v5/public/instruments', {
+      const data = await this.requestWithRetry<OKXInstrumentsResponse>('get', '/api/v5/public/instruments', {
         params: {
           instType: 'SWAP', // Perpetual swaps
         },
       });
 
       // Check if request was successful
-      if (response.data.code !== '0') {
-        throw new Error(`OKX API error: ${response.data.msg}`);
+      if (data.code !== '0') {
+        throw new Error(`OKX API error: ${data.msg}`);
       }
 
       // Filter for live USDT-settled linear perpetual contracts
-      const assets = response.data.data.filter(
+      const assets = data.data.filter(
         (instrument) =>
           instrument.state === 'live' &&
           instrument.ctType === 'linear' &&
@@ -160,24 +216,24 @@ export class OKXClient {
           params.before = currentBefore.toString();
         }
 
-        const response = await this.client.get<OKXFundingRateHistoryResponse>('/api/v5/public/funding-rate-history', {
+        const data = await this.requestWithRetry<OKXFundingRateHistoryResponse>('get', '/api/v5/public/funding-rate-history', {
           params,
         });
 
         isFirstRequest = false;
 
         // Check if request was successful
-        if (response.data.code !== '0') {
-          throw new Error(`OKX API error: ${response.data.msg}`);
+        if (data.code !== '0') {
+          throw new Error(`OKX API error: ${data.msg}`);
         }
 
-        const fundingData = response.data.data;
+        const fundingData = data.data;
 
         // Debug logging to see what OKX is returning
         if (!fundingData || !Array.isArray(fundingData) || fundingData.length === 0) {
           logger.warn(`No funding data from OKX for ${instId}. Response:`, {
-            code: response.data.code,
-            msg: response.data.msg,
+            code: data.code,
+            msg: data.msg,
             dataLength: fundingData?.length || 0,
             params: { instId, before: currentBefore, after, limit: 100 }
           });
@@ -258,6 +314,12 @@ export class OKXClient {
     await runPromisePool(
       instIds,
       async (instId) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${instId} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching ${instId} from OKX...`);
           const data = await this.getFundingHistory(instId);
@@ -271,6 +333,14 @@ export class OKXClient {
           logger.info(`[API] ✓ ${instId}: ${data.length} records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${instId}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by OKX`, errorMsg);
+            return; // Stop processing this and future symbols
+          }
+
           logger.error(`[API] ✗ ${instId}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch funding history for ${instId}`, errorMsg);
 
@@ -332,7 +402,7 @@ export class OKXClient {
       const maxBatches = 20; // 20 * 100 candles = 2,000 hours of history buffer
 
       while (currentAfter > targetStart && safetyCounter < maxBatches) {
-        const response = await this.client.get<OKXKlineResponse>('/api/v5/market/history-candles', {
+        const data = await this.requestWithRetry<OKXKlineResponse>('get', '/api/v5/market/history-candles', {
           params: {
             instId: symbol,
             bar,
@@ -342,11 +412,11 @@ export class OKXClient {
         });
 
         // Check if request was successful
-        if (response.data.code !== '0') {
-          throw new Error(`OKX API error: ${response.data.msg}`);
+        if (data.code !== '0') {
+          throw new Error(`OKX API error: ${data.msg}`);
         }
 
-        const candles = response.data.data;
+        const candles = data.data;
         if (!candles || !Array.isArray(candles) || candles.length === 0) {
           break; // No more data
         }
@@ -421,6 +491,12 @@ export class OKXClient {
     await runPromisePool(
       symbols,
       async (symbol) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${symbol} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching OHLCV ${symbol} from OKX...`);
           const data = await this.getOHLCV(symbol, bar);
@@ -434,6 +510,14 @@ export class OKXClient {
           logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${symbol}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by OKX`, errorMsg);
+            return;
+          }
+
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
           if (!onItemFetched) {
@@ -487,7 +571,8 @@ export class OKXClient {
 
       // For 30 days of historical data, use 1D period with limit=30
       // This is the most efficient and reliable approach
-      const response = await this.client.get<OKXOpenInterestHistoryResponse>(
+      const data = await this.requestWithRetry<OKXOpenInterestHistoryResponse>(
+        'get',
         '/api/v5/rubik/stat/contracts/open-interest-history',
         {
           params: {
@@ -499,11 +584,11 @@ export class OKXClient {
       );
 
       // Check if request was successful
-      if (response.data.code !== '0') {
-        throw new Error(`OKX API error: ${response.data.msg}`);
+      if (data.code !== '0') {
+        throw new Error(`OKX API error: ${data.msg}`);
       }
 
-      const oiData = response.data.data;
+      const oiData = data.data;
       if (!oiData || !Array.isArray(oiData) || oiData.length === 0) {
         logger.warn(`No open interest history found for ${instId}`);
         return [];
@@ -553,6 +638,12 @@ export class OKXClient {
     await runPromisePool(
       instIds,
       async (instId) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${instId} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching OI ${instId} from OKX...`);
           const data = await this.getOpenInterest(instId, period);
@@ -566,6 +657,14 @@ export class OKXClient {
           logger.info(`[API] ✓ ${instId}: ${data.length} OI records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${instId}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by OKX`, errorMsg);
+            return;
+          }
+
           logger.error(`[API] ✗ ${instId}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch open interest for ${instId}`, errorMsg);
           if (!onItemFetched) {

@@ -16,6 +16,7 @@ import {
 export class AsterClient {
   private client: AxiosInstance;
   private baseURL: string;
+  private isBanned: boolean = false;
 
   constructor() {
     // Aster Finance Futures V3 API
@@ -31,6 +32,61 @@ export class AsterClient {
     });
 
     logger.info('Aster Finance Futures V3 API client initialized', { baseURL: this.baseURL });
+  }
+
+  /**
+   * Check if IP is currently banned
+   */
+  public isBannedStatus(): boolean {
+    return this.isBanned;
+  }
+
+  /**
+   * Wrapper for axios requests with retry logic on rate limits
+   * - Retries on HTTP 429 (rate limited) with exponential backoff
+   * - Throws error on HTTP 418/403 (IP banned or forbidden)
+   */
+  private async requestWithRetry<T>(
+    method: 'get' | 'post',
+    url: string,
+    config?: any,
+    maxRetries: number = 3
+  ): Promise<T> {
+    let lastError: any;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = method === 'get'
+          ? await this.client.get<T>(url, config)
+          : await this.client.post<T>(url, config);
+        return response.data;
+      } catch (error: any) {
+        if (axios.isAxiosError(error)) {
+          const status = error.response?.status;
+
+          // HTTP 418/403: IP banned or forbidden - stop immediately
+          if (status === 418 || status === 403) {
+            this.isBanned = true;
+            const banMsg = this.getErrorMessage(error);
+            logger.error(`IP BANNED/FORBIDDEN by Aster: ${banMsg}`);
+            throw new Error(`IP_BANNED: ${banMsg}`);
+          }
+
+          // HTTP 429: Rate limited - retry with exponential backoff
+          if (status === 429 && attempt < maxRetries) {
+            const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+            logger.warn(`Rate limited on ${url}, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+            await new Promise(resolve => setTimeout(resolve, delayMs));
+            continue;
+          }
+        }
+
+        lastError = error;
+      }
+    }
+
+    // All retries exhausted
+    throw lastError;
   }
 
   private resolveBaseURL(): string {
@@ -78,9 +134,9 @@ export class AsterClient {
     try {
       logger.info('Fetching perpetual contracts from Aster Finance Futures');
 
-      const response = await this.client.get<AsterExchangeInfo>('/fapi/v1/exchangeInfo');
+      const data = await this.requestWithRetry<AsterExchangeInfo>('get', '/fapi/v1/exchangeInfo');
 
-      const assets = response.data.symbols.filter(
+      const assets = data.symbols.filter(
         (s) => s.status === 'TRADING' && s.contractType === 'PERPETUAL'
       );
 
@@ -126,7 +182,7 @@ export class AsterClient {
       const endTime = Date.now();
       const startTime = endTime - hoursAgo * 60 * 60 * 1000;
 
-      const response = await this.client.get<AsterFundingRate[]>('/fapi/v1/fundingRate', {
+      const fundingData = await this.requestWithRetry<AsterFundingRate[]>('get', '/fapi/v1/fundingRate', {
         params: {
           symbol,
           startTime,
@@ -134,8 +190,6 @@ export class AsterClient {
           limit: 1000, // Max limit
         },
       });
-
-      const fundingData = response.data;
       if (!fundingData || !Array.isArray(fundingData)) {
         logger.warn(`No funding data found for ${symbol}`);
         return [];
@@ -181,6 +235,12 @@ export class AsterClient {
     await runPromisePool(
       symbols,
       async (symbol) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${symbol} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching ${symbol} from Aster...`);
           const data = await this.getFundingHistory(symbol);
@@ -194,6 +254,14 @@ export class AsterClient {
           logger.info(`[API] ✓ ${symbol}: ${data.length} records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${symbol}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by Aster`, errorMsg);
+            return;
+          }
+
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch funding history for ${symbol}`, errorMsg);
           if (!onItemFetched) {
@@ -240,7 +308,7 @@ export class AsterClient {
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
       const endTime = Date.now();
 
-      const response = await this.client.get<AsterKline[]>('/fapi/v1/klines', {
+      const klines = await this.requestWithRetry<AsterKline[]>('get', '/fapi/v1/klines', {
         params: {
           symbol,
           interval,
@@ -251,9 +319,7 @@ export class AsterClient {
       });
 
       // Temporary log to inspect raw API response
-      logger.info(`Raw OHLCV data for ${symbol} from Aster:`, response.data);
-
-      const klines = response.data;
+      logger.info(`Raw OHLCV data for ${symbol} from Aster:`, klines);
       if (!klines || !Array.isArray(klines)) {
         logger.warn(`No OHLCV data found for ${symbol}`);
         return [];
@@ -306,6 +372,12 @@ export class AsterClient {
     await runPromisePool(
       symbols,
       async (symbol) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${symbol} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching OHLCV ${symbol} from Aster...`);
           const data = await this.getOHLCV(symbol, interval);
@@ -319,6 +391,14 @@ export class AsterClient {
           logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${symbol}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by Aster`, errorMsg);
+            return;
+          }
+
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
           if (!onItemFetched) {
@@ -365,14 +445,13 @@ export class AsterClient {
       logger.debug(`Fetching open interest snapshot for ${symbol} from Aster`);
 
       // Use the real-time endpoint (only endpoint available)
-      const response = await this.client.get<{ symbol: string; openInterest: string; time: number }>(
+      const oiSnapshot = await this.requestWithRetry<{ symbol: string; openInterest: string; time: number }>(
+        'get',
         '/fapi/v1/openInterest',
         {
           params: { symbol },
         }
       );
-
-      const oiSnapshot = response.data;
       if (!oiSnapshot || !oiSnapshot.openInterest) {
         logger.warn(`No open interest data found for ${symbol}`);
         return [];
@@ -435,6 +514,12 @@ export class AsterClient {
     await runPromisePool(
       symbols,
       async (symbol) => {
+        // Check if IP is banned before processing
+        if (this.isBanned) {
+          logger.warn(`[API] Skipping ${symbol} - IP is banned`);
+          return;
+        }
+
         try {
           logger.info(`[API] Fetching OI ${symbol} from Aster...`);
           const data = await this.getOpenInterest(symbol, period);
@@ -452,6 +537,14 @@ export class AsterClient {
           }
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
+
+          // Check if this is an IP ban error
+          if (errorMsg.includes('IP_BANNED')) {
+            logger.error(`[API] ✗ ${symbol}: IP BANNED - stopping all fetches`);
+            logger.error(`IP banned by Aster`, errorMsg);
+            return;
+          }
+
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch open interest for ${symbol}`, errorMsg);
           if (!onItemFetched) {
