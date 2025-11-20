@@ -112,3 +112,21 @@ export interface FetchedOIData {
   openInterest: string;
   openInterestValue?: string;
 }
+
+export interface OKXLongShortRatioResponse {
+  code: string;
+  msg: string;
+  data: [string, string][]; // [timestamp, ratio]
+}
+
+export interface FetchedLongShortRatioData {
+  asset: string;
+  timestamp: Date;
+  longRatio: number;
+  shortRatio: number;
+  longAccount?: number;
+  shortAccount?: number;
+  platform: 'okx';
+  type: 'global_account';
+  period: string;
+}

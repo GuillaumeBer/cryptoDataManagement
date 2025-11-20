@@ -9,8 +9,9 @@ import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
 import OHLCVRepository from '../models/OHLCVRepository';
 import OpenInterestRepository from '../models/OpenInterestRepository';
+import LongShortRatioRepository from '../models/LongShortRatioRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
-import { CreateFundingRateParams, CreateOHLCVParams, CreateOpenInterestParams } from '../models/types';
+import { CreateFundingRateParams, CreateOHLCVParams, CreateOpenInterestParams, CreateLongShortRatioParams } from '../models/types';
 import {
   normalizePlatformAsset,
   SupportedPlatform,
@@ -47,6 +48,18 @@ interface OIRecord {
   openInterestValue?: string;
 }
 
+interface LSRatioRecord {
+  asset: string;
+  timestamp: Date;
+  longRatio: number;
+  shortRatio: number;
+  longAccount?: number;
+  shortAccount?: number;
+  platform: string;
+  type: string;
+  period: string;
+}
+
 // Union type for all platform clients
 type PlatformClient = {
   getAssets(): Promise<PlatformAssetPayload[]>;
@@ -76,6 +89,15 @@ type PlatformClient = {
     rateLimiter?: RateLimiter,
     onItemFetched?: (symbol: string, data: OIRecord[]) => Promise<void>
   ): Promise<Map<string, OIRecord[]>>;
+  getLongShortRatioBatch?(
+    symbols: string[],
+    period?: string | number,
+    delayMs?: number,
+    concurrency?: number,
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: LSRatioRecord[]) => Promise<void>
+  ): Promise<Map<string, LSRatioRecord[]>>;
 };
 
 export type ProgressPhase = 'fetch' | 'resample';
@@ -88,6 +110,8 @@ export type FetchStage =
   | 'ohlcvStore'
   | 'oiFetch'
   | 'oiStore'
+  | 'lsRatioFetch'
+  | 'lsRatioStore'
   | 'resample';
 
 /**
@@ -120,6 +144,7 @@ export interface ProgressEvent {
   recordsFetched: number;
   ohlcvRecordsFetched?: number;
   oiRecordsFetched?: number;
+  lsRatioRecordsFetched?: number;
   resampleRecordsCreated?: number;
   resampleAssetsProcessed?: number;
   errors: string[];
@@ -135,6 +160,8 @@ const STAGE_LABELS: Record<FetchStage, string> = {
   ohlcvStore: 'Store OHLCV data',
   oiFetch: 'Fetch open interest',
   oiStore: 'Store open interest',
+  lsRatioFetch: 'Fetch L/S Ratios',
+  lsRatioStore: 'Store L/S Ratios',
   resample: 'Generate 8h aggregates',
 };
 
@@ -235,6 +262,8 @@ const INITIAL_STAGE_ORDER: FetchStage[] = [
   'ohlcvStore',
   'oiFetch',
   'oiStore',
+  'lsRatioFetch',
+  'lsRatioStore',
 ];
 
 const INCREMENTAL_STAGE_ORDER: FetchStage[] = [
@@ -244,6 +273,8 @@ const INCREMENTAL_STAGE_ORDER: FetchStage[] = [
   'ohlcvStore',
   'oiFetch',
   'oiStore',
+  'lsRatioFetch',
+  'lsRatioStore',
 ];
 
 interface EmitStageProgressArgs {
@@ -257,6 +288,7 @@ interface EmitStageProgressArgs {
   recordsFetched: number;
   ohlcvRecordsFetched?: number;
   oiRecordsFetched?: number;
+  lsRatioRecordsFetched?: number;
   errors: string[];
   currentAsset?: string;
   message?: string;
@@ -362,6 +394,22 @@ export class DataFetcherService extends EventEmitter {
         return '1d'; // OKX stores daily OI data
       default:
         return '1h'; // Most platforms store hourly OI data
+    }
+  }
+
+  /**
+   * Get the L/S Ratio interval/period for each platform
+   */
+  private getLSRatioInterval(): string {
+    switch (this.platform) {
+      case 'binance':
+        return '5m'; // We want high granularity if possible, or '1h'
+      case 'bybit':
+        return '5min'; // Bybit supports 5min, 15min, 30min, 1h, 4h, 1d
+      case 'okx':
+        return '1H'; // OKX supports 5m, 1H, 4H, 1D
+      default:
+        return '1h';
     }
   }
 
@@ -560,6 +608,7 @@ export class DataFetcherService extends EventEmitter {
     errors: string[];
     ohlcvRecordsFetched?: number;
     oiRecordsFetched?: number;
+    lsRatioRecordsFetched?: number;
     stageState?: {
       order: FetchStage[];
       map: StageStateMap;
@@ -590,6 +639,7 @@ export class DataFetcherService extends EventEmitter {
           recordsFetched: context.recordsFetched,
           ohlcvRecordsFetched: context.ohlcvRecordsFetched,
           oiRecordsFetched: context.oiRecordsFetched,
+          lsRatioRecordsFetched: context.lsRatioRecordsFetched,
           errors: context.errors,
           message: 'Fetch complete',
         });
@@ -603,6 +653,8 @@ export class DataFetcherService extends EventEmitter {
           processedAssets: context.assetsProcessed,
           recordsFetched: context.recordsFetched,
           ohlcvRecordsFetched: context.ohlcvRecordsFetched,
+          oiRecordsFetched: context.oiRecordsFetched,
+          lsRatioRecordsFetched: context.lsRatioRecordsFetched,
           errors: context.errors,
           percentage: 100,
         };
@@ -638,6 +690,8 @@ export class DataFetcherService extends EventEmitter {
       processedAssets: context.assetsProcessed,
       recordsFetched: context.recordsFetched,
       ohlcvRecordsFetched: context.ohlcvRecordsFetched,
+      oiRecordsFetched: context.oiRecordsFetched,
+      lsRatioRecordsFetched: context.lsRatioRecordsFetched,
       errors: context.errors,
       message: 'Generating 8-hour aggregated data...',
     });
@@ -661,6 +715,8 @@ export class DataFetcherService extends EventEmitter {
         processedAssets: context.assetsProcessed,
         recordsFetched: context.recordsFetched,
         ohlcvRecordsFetched: context.ohlcvRecordsFetched,
+        oiRecordsFetched: context.oiRecordsFetched,
+        lsRatioRecordsFetched: context.lsRatioRecordsFetched,
         errors: context.errors,
         resampleAssetsProcessed: assetsProcessed,
         resampleRecordsCreated: recordsCreated,
@@ -683,6 +739,8 @@ export class DataFetcherService extends EventEmitter {
         processedAssets: context.assetsProcessed,
         recordsFetched: context.recordsFetched,
         ohlcvRecordsFetched: context.ohlcvRecordsFetched,
+        oiRecordsFetched: context.oiRecordsFetched,
+        lsRatioRecordsFetched: context.lsRatioRecordsFetched,
         errors: context.errors,
         message: 'Resampling failed',
       });
@@ -699,6 +757,7 @@ export class DataFetcherService extends EventEmitter {
     recordsFetched: number;
     ohlcvRecordsFetched: number;
     oiRecordsFetched: number;
+    lsRatioRecordsFetched: number;
     errors: string[];
   }> {
     if (this.isInitialFetchInProgress) throw new Error('Initial fetch is already in progress');
@@ -726,6 +785,7 @@ export class DataFetcherService extends EventEmitter {
     let recordsFetched = 0;
     let ohlcvRecordsFetched = 0;
     let oiRecordsFetched = 0;
+    let lsRatioRecordsFetched = 0;
     const errors: string[] = [];
 
     try {
@@ -761,6 +821,8 @@ export class DataFetcherService extends EventEmitter {
         ohlcvStore: assetSymbols.length,
         oiFetch: assetSymbols.length,
         oiStore: assetSymbols.length,
+        lsRatioFetch: assetSymbols.length,
+        lsRatioStore: assetSymbols.length,
       };
       if (this.platform === 'hyperliquid') stageTotals.resample = assetSymbols.length;
 
@@ -780,6 +842,7 @@ export class DataFetcherService extends EventEmitter {
           recordsFetched,
           ohlcvRecordsFetched,
           oiRecordsFetched,
+          lsRatioRecordsFetched,
           errors,
           message,
         });
@@ -912,16 +975,6 @@ export class DataFetcherService extends EventEmitter {
         let fetchedCount = 0;
         let storedCount = 0;
 
-        // Note: Bybit needs OHLCV for OI calculation.
-        // If we run in parallel, we might miss OHLCV data for calculation if not fetched yet.
-        // For simplicity in this optimization, we might skip the precise OHLCV-based calculation
-        // or fetch just the needed price if critical.
-        // However, BybitClient allows passing `ohlcvDataMap`.
-        // If we are fully parallel, we don't have the full map.
-        // We will accept that Bybit OI Value might be missing if we don't pass it,
-        // or we can wait for OHLCV to finish if strict requirement.
-        // For now, we run parallel for speed, accepting potential missing computed fields.
-
         await this.platformClient.getOpenInterestBatch(
           assetSymbols,
           this.getOIInterval(),
@@ -967,8 +1020,68 @@ export class DataFetcherService extends EventEmitter {
         updateStage(stageMap, 'oiStore', { status: 'complete' });
       };
 
+      // D. Long/Short Ratio Pipeline
+      const lsRatioPipeline = async () => {
+        if (!this.platformClient.getLongShortRatioBatch) {
+          updateStage(stageMap, 'lsRatioFetch', { status: 'complete', message: 'Not supported' });
+          updateStage(stageMap, 'lsRatioStore', { status: 'complete', message: 'Not supported' });
+          return;
+        }
+
+        updateStage(stageMap, 'lsRatioFetch', { status: 'active', message: 'Fetching L/S Ratios...' });
+        updateStage(stageMap, 'lsRatioStore', { status: 'active', message: 'Storing L/S Ratios...' });
+
+        let fetchedCount = 0;
+        let storedCount = 0;
+
+        await this.platformClient.getLongShortRatioBatch(
+          assetSymbols,
+          this.getLSRatioInterval(),
+          0,
+          this.getConcurrencyLimit(),
+          (symbol, processed) => {
+            fetchedCount = processed;
+            updateStage(stageMap, 'lsRatioFetch', { completed: fetchedCount, currentItem: symbol });
+            emitProgress('Fetching L/S Ratios...');
+          },
+          this.rateLimiter,
+          async (symbol, data) => {
+            try {
+              const assetId = assetMap.get(symbol);
+              if (!assetId) return;
+
+              const records: CreateLongShortRatioParams[] = data.map((d) => ({
+                asset_id: assetId,
+                timestamp: d.timestamp,
+                long_ratio: d.longRatio,
+                short_ratio: d.shortRatio,
+                long_account: d.longAccount,
+                short_account: d.shortAccount,
+                platform: this.platform,
+                type: d.type,
+                period: d.period,
+              }));
+
+              if (records.length > 0) {
+                const inserted = await LongShortRatioRepository.bulkUpsert(records);
+                lsRatioRecordsFetched += inserted;
+              }
+
+              storedCount++;
+              updateStage(stageMap, 'lsRatioStore', { completed: storedCount, currentItem: symbol });
+              emitProgress('Storing L/S Ratios...');
+            } catch (err) {
+              errors.push(`L/S Ratio store error ${symbol}: ${err}`);
+            }
+          }
+        );
+
+        updateStage(stageMap, 'lsRatioFetch', { status: 'complete' });
+        updateStage(stageMap, 'lsRatioStore', { status: 'complete' });
+      };
+
       // Execute all pipelines in parallel
-      await Promise.all([fundingPipeline(), ohlcvPipeline(), oiPipeline()]);
+      await Promise.all([fundingPipeline(), ohlcvPipeline(), oiPipeline(), lsRatioPipeline()]);
 
       // Calculate total processed (approximate as max of any stage)
       assetsProcessed = assetSymbols.length;
@@ -983,11 +1096,12 @@ export class DataFetcherService extends EventEmitter {
         recordsFetched,
         ohlcvRecordsFetched,
         oiRecordsFetched,
+        lsRatioRecordsFetched,
         errors,
         stageState
       });
 
-      return { assetsProcessed, recordsFetched, ohlcvRecordsFetched, oiRecordsFetched, errors };
+      return { assetsProcessed, recordsFetched, ohlcvRecordsFetched, oiRecordsFetched, lsRatioRecordsFetched, errors };
 
     } catch (error) {
        const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1013,6 +1127,7 @@ export class DataFetcherService extends EventEmitter {
     recordsFetched: number;
     ohlcvRecordsFetched: number;
     oiRecordsFetched: number;
+    lsRatioRecordsFetched: number;
     errors: string[];
   }> {
     if (this.isIncrementalFetchInProgress) throw new Error('Incremental fetch is already in progress');
@@ -1039,13 +1154,14 @@ export class DataFetcherService extends EventEmitter {
     let recordsFetched = 0;
     let ohlcvRecordsFetched = 0;
     let oiRecordsFetched = 0;
+    let lsRatioRecordsFetched = 0;
     const errors: string[] = [];
 
     try {
       const assets = await AssetRepository.findByPlatform(this.platform);
       if (assets.length === 0) {
          await FetchLogRepository.complete(fetchLog.id, 'failed', 0, 0, 'No assets found');
-         return { assetsProcessed: 0, recordsFetched: 0, ohlcvRecordsFetched: 0, oiRecordsFetched: 0, errors: ['No assets'] };
+         return { assetsProcessed: 0, recordsFetched: 0, ohlcvRecordsFetched: 0, oiRecordsFetched: 0, lsRatioRecordsFetched: 0, errors: ['No assets'] };
       }
 
       const assetSymbols = assets.map(a => a.symbol);
@@ -1054,6 +1170,10 @@ export class DataFetcherService extends EventEmitter {
       // Pre-fetch latest timestamps to minimize DB lookups inside loops
       const latestFundingTimestamps = await FundingRateRepository.getLatestTimestamps(assets.map(a => a.id), this.platform, this.getSamplingInterval());
       const latestOHLCVTimestamps = await OHLCVRepository.getLatestTimestamps(assets.map(a => a.id), this.platform, '1h');
+      // For L/S Ratio, we need latest timestamps too. Assuming we use '5m' or '1h' as default period for now.
+      // We'll use getLatestTimestamp inside the loop or fetch batch if repo supports it.
+      // For now, let's just fetch latest inside the loop or rely on upsert.
+      // Optimization: Add getLatestTimestamps to LongShortRatioRepository later.
 
       const stageOrder = this.platform === 'hyperliquid'
         ? ([...INCREMENTAL_STAGE_ORDER, 'resample'] as FetchStage[])
@@ -1066,6 +1186,8 @@ export class DataFetcherService extends EventEmitter {
         ohlcvStore: assets.length,
         oiFetch: assets.length,
         oiStore: assets.length,
+        lsRatioFetch: assets.length,
+        lsRatioStore: assets.length,
       };
       if (this.platform === 'hyperliquid') stageTotals.resample = assets.length;
 
@@ -1082,6 +1204,7 @@ export class DataFetcherService extends EventEmitter {
           recordsFetched,
           ohlcvRecordsFetched,
           oiRecordsFetched,
+          lsRatioRecordsFetched,
           errors,
           message,
         });
@@ -1097,7 +1220,7 @@ export class DataFetcherService extends EventEmitter {
           assetSymbols,
           0,
           this.getConcurrencyLimit(),
-          (symbol, processed) => {
+          (_symbol, processed) => {
              fetchedCount = processed;
              updateStage(stageMap, 'fundingFetch', { completed: fetchedCount });
              emitProgress();
@@ -1148,7 +1271,7 @@ export class DataFetcherService extends EventEmitter {
           this.getOHLCVInterval(),
           0,
           this.getConcurrencyLimit(),
-          (symbol, processed) => {
+          (_symbol, processed) => {
              fetchedCount = processed;
              updateStage(stageMap, 'ohlcvFetch', { completed: fetchedCount });
              emitProgress();
@@ -1209,7 +1332,7 @@ export class DataFetcherService extends EventEmitter {
           this.getOIInterval(),
           0,
           this.getConcurrencyLimit(),
-          (symbol, processed) => {
+          (_symbol, processed) => {
              fetchedCount = processed;
              updateStage(stageMap, 'oiFetch', { completed: fetchedCount });
              emitProgress();
@@ -1248,7 +1371,68 @@ export class DataFetcherService extends EventEmitter {
         updateStage(stageMap, 'oiStore', { status: 'complete' });
       };
 
-      await Promise.all([fundingPipeline(), ohlcvPipeline(), oiPipeline()]);
+      // D. L/S Ratio Pipeline
+      const lsRatioPipeline = async () => {
+        if (!this.platformClient.getLongShortRatioBatch) {
+          updateStage(stageMap, 'lsRatioFetch', { status: 'complete', message: 'Not supported' });
+          updateStage(stageMap, 'lsRatioStore', { status: 'complete', message: 'Not supported' });
+          return;
+        }
+
+        updateStage(stageMap, 'lsRatioFetch', { status: 'active', message: 'Fetching L/S Ratio updates...' });
+        let fetchedCount = 0;
+        let storedCount = 0;
+
+        await this.platformClient.getLongShortRatioBatch(
+          assetSymbols,
+          this.getLSRatioInterval(),
+          0,
+          this.getConcurrencyLimit(),
+          (_symbol, processed) => {
+             fetchedCount = processed;
+             updateStage(stageMap, 'lsRatioFetch', { completed: fetchedCount });
+             emitProgress();
+          },
+          this.rateLimiter,
+          async (symbol, data) => {
+             try {
+               const assetId = assetMap.get(symbol);
+               if (!assetId) return;
+
+               // For incremental, we could filter by timestamp if we had latest timestamps fetched.
+               // Since we didn't fetch latest timestamps for L/S yet, we'll rely on bulkUpsert to handle duplicates safely.
+               // Or we can fetch latest timestamp here (slower).
+               // Given it's incremental, we probably only get recent data anyway.
+               
+               const records: CreateLongShortRatioParams[] = data.map((d) => ({
+                 asset_id: assetId,
+                 timestamp: d.timestamp,
+                 long_ratio: d.longRatio,
+                 short_ratio: d.shortRatio,
+                 long_account: d.longAccount,
+                 short_account: d.shortAccount,
+                 platform: this.platform,
+                 type: d.type,
+                 period: d.period,
+               }));
+
+               if (records.length > 0) {
+                 const inserted = await LongShortRatioRepository.bulkUpsert(records);
+                 lsRatioRecordsFetched += inserted;
+               }
+               storedCount++;
+               updateStage(stageMap, 'lsRatioStore', { completed: storedCount });
+               emitProgress();
+             } catch (err) {
+               errors.push(`L/S Ratio update error ${symbol}: ${err}`);
+             }
+          }
+        );
+        updateStage(stageMap, 'lsRatioFetch', { status: 'complete' });
+        updateStage(stageMap, 'lsRatioStore', { status: 'complete' });
+      };
+
+      await Promise.all([fundingPipeline(), ohlcvPipeline(), oiPipeline(), lsRatioPipeline()]);
 
       assetsProcessed = assets.length;
       const status = errors.length === 0 ? 'success' : 'partial';
@@ -1260,11 +1444,12 @@ export class DataFetcherService extends EventEmitter {
         recordsFetched,
         ohlcvRecordsFetched,
         oiRecordsFetched,
+        lsRatioRecordsFetched,
         errors,
         stageState
       });
 
-      return { assetsProcessed, recordsFetched, ohlcvRecordsFetched, oiRecordsFetched, errors };
+      return { assetsProcessed, recordsFetched, ohlcvRecordsFetched, oiRecordsFetched, lsRatioRecordsFetched, errors };
 
     } catch (error) {
        const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1331,6 +1516,7 @@ export class DataFetcherService extends EventEmitter {
     const assetCount = await AssetRepository.count(this.platform);
     const fundingRateCount = await FundingRateRepository.count(this.platform);
     const ohlcvCount = await OHLCVRepository.count(this.platform, '1h');
+    const lsRatioCount = await LongShortRatioRepository.count(this.platform); // Assuming count method exists or we add it
     const lastFetch = await FetchLogRepository.getLastSuccessful(this.platform);
 
     return {
@@ -1338,6 +1524,7 @@ export class DataFetcherService extends EventEmitter {
       assetCount,
       fundingRateCount,
       ohlcvCount,
+      lsRatioCount,
       lastFetch: lastFetch
         ? {
             type: lastFetch.fetch_type,

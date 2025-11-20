@@ -11,6 +11,8 @@ import {
   FetchedOHLCVData,
   BybitOpenInterestResponse,
   FetchedOIData,
+  BybitAccountRatioResponse,
+  FetchedLongShortRatioData,
 } from './types';
 
 /**
@@ -682,6 +684,123 @@ export class BybitClient {
 
     return results;
   }
+  /**
+   * Fetch Account Long/Short Ratio
+   * Endpoint: GET /v5/market/account-ratio
+   *
+   * API Documentation:
+   * - Returns buy/sell ratio of holders
+   * - Supports periods: 5min, 15min, 30min, 1h, 4h, 1d
+   * - Max limit: 500 records per request
+   *
+   * Rate Limits:
+   * - 50 requests per 2 seconds
+   */
+  async getAccountRatio(
+    symbol: string,
+    period: string = '1h'
+  ): Promise<FetchedLongShortRatioData[]> {
+    try {
+      logger.debug(`Fetching Account L/S Ratio for ${symbol} from Bybit`);
+
+      // Calculate time range: 30 days (typical limit for ratios)
+      // const daysAgo = 30;
+      // const startTime = Date.now() - (daysAgo * 24 * 60 * 60 * 1000);
+      // const endTime = Date.now();
+
+      const data = await this.requestWithRetry<BybitAccountRatioResponse>('get', '/v5/market/account-ratio', {
+        params: {
+          category: 'linear',
+          symbol,
+          period,
+          limit: 500,
+        },
+      });
+
+      if (data.retCode !== 0) {
+        throw new Error(`Bybit API error: ${data.retMsg}`);
+      }
+
+      const ratioData = data.result.list;
+      if (!ratioData || !Array.isArray(ratioData)) {
+        logger.warn(`No L/S ratio data found for ${symbol}`);
+        return [];
+      }
+
+      const results: FetchedLongShortRatioData[] = ratioData.map((point) => ({
+        asset: symbol,
+        timestamp: new Date(parseInt(point.timestamp)),
+        longRatio: parseFloat(point.buyRatio),
+        shortRatio: parseFloat(point.sellRatio),
+        longAccount: parseFloat(point.buyRatio), // Bybit gives ratios directly
+        shortAccount: parseFloat(point.sellRatio),
+        platform: 'bybit',
+        type: 'account_ratio',
+        period,
+      }));
+
+      logger.debug(`Fetched ${results.length} L/S ratio records for ${symbol}`);
+      return results;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch L/S ratio for ${symbol}: ${errorMsg}`);
+      throw new Error(`Failed to fetch L/S ratio for ${symbol}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch L/S Ratio history for multiple symbols with rate limiting
+   */
+  async getLongShortRatioBatch(
+    symbols: string[],
+    period: string = '1h',
+    delayMs: number = 600,
+    concurrency: number = 1,
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedLongShortRatioData[]) => Promise<void>
+  ): Promise<Map<string, FetchedLongShortRatioData[]>> {
+    const results = new Map<string, FetchedLongShortRatioData[]>();
+
+    logger.info(`Fetching L/S Ratio data for ${symbols.length} assets from Bybit`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      symbols,
+      async (symbol) => {
+        if (this.isBanned) return;
+
+        try {
+          logger.info(`[API] Fetching L/S Ratio ${symbol} from Bybit...`);
+          const data = await this.getAccountRatio(symbol, period);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
+          logger.info(`[API] ✓ ${symbol}: ${data.length} L/S records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          if (errorMsg.includes('IP_BANNED')) {
+            return;
+          }
+          logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          if (!onItemFetched) results.set(symbol, []);
+        } finally {
+          processed++;
+          if (onProgress) onProgress(symbol, processed);
+        }
+      },
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
+    );
+
+    return results;
+  }
 }
+
 
 export default BybitClient;

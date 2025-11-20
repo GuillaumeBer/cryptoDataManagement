@@ -67,3 +67,23 @@ export interface FetchedOIData {
   openInterest: string;
   openInterestValue?: string;
 }
+
+export interface BinanceLongShortRatio {
+  symbol: string;
+  longShortRatio: string;
+  longAccount: string; // "0.6543"
+  shortAccount: string; // "0.3457"
+  timestamp: number;
+}
+
+export interface FetchedLongShortRatioData {
+  asset: string;
+  timestamp: Date;
+  longRatio: number;
+  shortRatio: number;
+  longAccount?: number;
+  shortAccount?: number;
+  platform: string;
+  type: string;
+  period: string;
+}

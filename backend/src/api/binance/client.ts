@@ -11,6 +11,8 @@ import {
   FetchedOHLCVData,
   BinanceOpenInterest,
   FetchedOIData,
+  BinanceLongShortRatio,
+  FetchedLongShortRatioData,
 } from './types';
 
 export class BinanceClient {
@@ -558,6 +560,126 @@ export class BinanceClient {
 
     return results;
   }
+  /**
+   * Fetch Top Trader Long/Short Position Ratio
+   * Endpoint: GET /futures/data/topLongShortPositionRatio
+   *
+   * API Documentation:
+   * - Returns historical ratio data
+   * - Supports periods: 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d
+   * - Max limit: 500 records per request
+   *
+   * Rate Limits:
+   * - Weight: 1 per request
+   */
+  async getTopLongShortPositionRatio(
+    symbol: string,
+    period: string = '1h'
+  ): Promise<FetchedLongShortRatioData[]> {
+    try {
+      logger.debug(`Fetching Top Trader L/S Position Ratio for ${symbol} from Binance`);
+
+      // Calculate time range: 30 days (Binance limit for this endpoint)
+      const daysAgo = 30;
+      const startTime = Date.now() - (daysAgo * 24 * 60 * 60 * 1000);
+      const endTime = Date.now();
+
+      const ratioData = await this.requestWithRetry<BinanceLongShortRatio[]>(
+        'get',
+        '/futures/data/topLongShortPositionRatio',
+        {
+          params: {
+            symbol,
+            period,
+            startTime,
+            endTime,
+            limit: 500,
+          },
+        }
+      );
+
+      if (!ratioData || !Array.isArray(ratioData)) {
+        logger.warn(`No L/S ratio data found for ${symbol}`);
+        return [];
+      }
+
+      const results: FetchedLongShortRatioData[] = ratioData.map((point) => ({
+        asset: symbol,
+        timestamp: new Date(point.timestamp),
+        longRatio: parseFloat(point.longAccount), // Binance returns string "0.6543"
+        shortRatio: parseFloat(point.shortAccount),
+        longAccount: parseFloat(point.longAccount), // For position ratio, these are the same
+        shortAccount: parseFloat(point.shortAccount),
+        platform: 'binance',
+        type: 'top_trader_position',
+        period,
+      }));
+
+      logger.debug(`Fetched ${results.length} L/S ratio records for ${symbol}`);
+      return results;
+    } catch (error: any) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return [];
+      }
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch L/S ratio for ${symbol}: ${errorMsg}`);
+      throw new Error(`Failed to fetch L/S ratio for ${symbol}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch L/S Ratio history for multiple symbols with rate limiting
+   */
+  async getLongShortRatioBatch(
+    symbols: string[],
+    period: string = '1h',
+    delayMs: number = 700,
+    concurrency: number = 1,
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedLongShortRatioData[]) => Promise<void>
+  ): Promise<Map<string, FetchedLongShortRatioData[]>> {
+    const results = new Map<string, FetchedLongShortRatioData[]>();
+
+    logger.info(`Fetching L/S Ratio data for ${symbols.length} assets from Binance Futures`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      symbols,
+      async (symbol) => {
+        if (this.isBanned) return;
+
+        try {
+          logger.info(`[API] Fetching L/S Ratio ${symbol} from Binance...`);
+          const data = await this.getTopLongShortPositionRatio(symbol, period);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
+          logger.info(`[API] ✓ ${symbol}: ${data.length} L/S records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          if (errorMsg.includes('IP_BANNED')) {
+            return;
+          }
+          logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          if (!onItemFetched) results.set(symbol, []);
+        } finally {
+          processed++;
+          if (onProgress) onProgress(symbol, processed);
+        }
+      },
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
+    );
+
+    return results;
+  }
 }
+
 
 export default BinanceClient;

@@ -12,6 +12,8 @@ import {
   // OKXOpenInterestResponse, // unused
   OKXOpenInterestHistoryResponse,
   FetchedOIData,
+  OKXLongShortRatioResponse,
+  FetchedLongShortRatioData,
 } from './types';
 
 /**
@@ -685,6 +687,136 @@ export class OKXClient {
       0
     );
     logger.info(`Fetched total of ${totalRecords} open interest records from OKX`);
+
+    return results;
+  }
+
+  /**
+   * Fetch Long/Short Ratio
+   * Endpoint: GET /api/v5/rubik/stat/contracts/long-short-account-ratio
+   *
+   * API Documentation:
+   * - Returns long/short account ratio
+   * - Supports periods: 5m, 1H, 4H, 1D
+   * - Max limit: 100 records per request
+   *
+   * Rate Limits:
+   * - 20 requests per 2 seconds
+   */
+  async getLongShortRatio(
+    instId: string,
+    period: string = '1H'
+  ): Promise<FetchedLongShortRatioData[]> {
+    try {
+      logger.debug(`Fetching L/S Ratio for ${instId} from OKX`);
+
+      // For 30 days of historical data, use 1D period with limit=30
+      // Similar to OI, this is the most reliable way to get history
+      const data = await this.requestWithRetry<OKXLongShortRatioResponse>(
+        'get',
+        '/api/v5/rubik/stat/contracts/long-short-account-ratio',
+        {
+          params: {
+            instId,
+            period: '1D', // Daily data for 30 days
+            limit: '30',
+          },
+        }
+      );
+
+      if (data.code !== '0') {
+        throw new Error(`OKX API error: ${data.msg}`);
+      }
+
+      const ratioData = data.data;
+      if (!ratioData || !Array.isArray(ratioData) || ratioData.length === 0) {
+        logger.warn(`No L/S ratio data found for ${instId}`);
+        return [];
+      }
+
+      // Format: [timestamp, ratio]
+      // OKX only gives the ratio, not the individual percentages.
+      // We can infer percentages: Ratio = Longs / Shorts
+      // Longs + Shorts = 1
+      // Longs = Ratio * Shorts
+      // Ratio * Shorts + Shorts = 1 => Shorts * (Ratio + 1) = 1 => Shorts = 1 / (Ratio + 1)
+      // Longs = 1 - Shorts
+      const results: FetchedLongShortRatioData[] = ratioData.map((point) => {
+        const ratio = parseFloat(point[1]);
+        const shorts = 1 / (ratio + 1);
+        const longs = 1 - shorts;
+
+        return {
+          asset: instId,
+          timestamp: new Date(parseInt(point[0])),
+          longRatio: longs,
+          shortRatio: shorts,
+          longAccount: longs, // Inferred
+          shortAccount: shorts, // Inferred
+          platform: 'okx',
+          type: 'global_account',
+          period,
+        };
+      });
+
+      logger.debug(`Fetched ${results.length} L/S ratio records for ${instId}`);
+      return results;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch L/S ratio for ${instId}: ${errorMsg}`);
+      throw new Error(`Failed to fetch L/S ratio for ${instId}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch L/S Ratio history for multiple symbols with rate limiting
+   */
+  async getLongShortRatioBatch(
+    instIds: string[],
+    period: string = '1H',
+    delayMs: number = 600,
+    concurrency: number = 1,
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedLongShortRatioData[]) => Promise<void>
+  ): Promise<Map<string, FetchedLongShortRatioData[]>> {
+    const results = new Map<string, FetchedLongShortRatioData[]>();
+
+    logger.info(`Fetching L/S Ratio data for ${instIds.length} assets from OKX`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      instIds,
+      async (instId) => {
+        if (this.isBanned) return;
+
+        try {
+          logger.info(`[API] Fetching L/S Ratio ${instId} from OKX...`);
+          const data = await this.getLongShortRatio(instId, period);
+
+          if (onItemFetched) {
+            await onItemFetched(instId, data);
+          } else {
+            results.set(instId, data);
+          }
+
+          logger.info(`[API] ✓ ${instId}: ${data.length} L/S records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          if (errorMsg.includes('IP_BANNED')) {
+            return;
+          }
+          logger.error(`[API] ✗ ${instId}: FAILED - ${errorMsg}`);
+          if (!onItemFetched) results.set(instId, []);
+        } finally {
+          processed++;
+          if (onProgress) onProgress(instId, processed);
+        }
+      },
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
+    );
 
     return results;
   }

@@ -211,7 +211,47 @@ export interface OpenInterestQuery {
   offset?: number;
 }
 
-export interface OpenInterestWithAsset extends OpenInterest {
+
+// Long/Short Ratio types
+export interface LongShortRatio {
+  id: number;
+  asset_id: number;
+  timestamp: Date;
+  long_ratio: number;
+  short_ratio: number;
+  long_account: number | null;
+  short_account: number | null;
+  platform: string;
+  type: string; // 'global_account', 'top_trader_position', 'top_trader_account'
+  period: string; // '5m', '15m', '1h', '4h', '1d'
+  fetched_at: Date;
+}
+
+export interface CreateLongShortRatioParams {
+  asset_id: number;
+  timestamp: Date;
+  long_ratio: number;
+  short_ratio: number;
+  long_account?: number;
+  short_account?: number;
+  platform: string;
+  type: string;
+  period: string;
+}
+
+export interface LongShortRatioQuery {
+  asset?: string;
+  assetId?: number;
+  startDate?: Date;
+  endDate?: Date;
+  platform?: string;
+  type?: string;
+  period?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface LongShortRatioWithAsset extends LongShortRatio {
   asset_symbol: string;
   asset_name: string | null;
 }

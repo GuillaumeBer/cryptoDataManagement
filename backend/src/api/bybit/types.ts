@@ -125,3 +125,28 @@ export interface FetchedOIData {
   openInterest: string;
   openInterestValue?: string;
 }
+
+export interface BybitAccountRatioResponse {
+  retCode: number;
+  retMsg: string;
+  result: {
+    list: Array<{
+      symbol: string;
+      buyRatio: string; // "0.6543"
+      sellRatio: string; // "0.3457"
+      timestamp: string; // "1672531200000"
+    }>;
+  };
+}
+
+export interface FetchedLongShortRatioData {
+  asset: string;
+  timestamp: Date;
+  longRatio: number;
+  shortRatio: number;
+  longAccount?: number;
+  shortAccount?: number;
+  platform: string;
+  type: string;
+  period: string;
+}
