@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import { runPromisePool } from '../../utils/promisePool';
+import { RateLimiter } from '../../utils/rateLimiter';
 import {
   BybitAsset,
   BybitInstrumentsResponse,
@@ -192,7 +193,9 @@ export class BybitClient {
     symbols: string[],
     delayMs: number = 600,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedFundingData[]) => Promise<void>
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
 
@@ -207,7 +210,13 @@ export class BybitClient {
         try {
           logger.info(`[API] Fetching ${symbol} from Bybit...`);
           const data = await this.getFundingHistory(symbol);
-          results.set(symbol, data);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
           logger.info(`[API] ✓ ${symbol}: ${data.length} records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
@@ -215,7 +224,9 @@ export class BybitClient {
           logger.error(`Failed to fetch funding history for ${symbol}`, errorMsg);
 
           // Store empty array for failed symbols to maintain consistency
-          results.set(symbol, []);
+          if (!onItemFetched) {
+            results.set(symbol, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -223,7 +234,7 @@ export class BybitClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(
@@ -310,7 +321,9 @@ export class BybitClient {
     interval: string = '60',
     delayMs: number = 600,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedOHLCVData[]) => Promise<void>
   ): Promise<Map<string, FetchedOHLCVData[]>> {
     const results = new Map<string, FetchedOHLCVData[]>();
 
@@ -325,13 +338,21 @@ export class BybitClient {
         try {
           logger.info(`[API] Fetching OHLCV ${symbol} from Bybit...`);
           const data = await this.getOHLCV(symbol, interval);
-          results.set(symbol, data);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
           logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
-          results.set(symbol, []);
+          if (!onItemFetched) {
+            results.set(symbol, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -339,7 +360,7 @@ export class BybitClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(
@@ -503,6 +524,8 @@ export class BybitClient {
     delayMs: number = 600,
     concurrency: number = 1,
     onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedOIData[]) => Promise<void>,
     ohlcvDataMap?: Map<string, FetchedOHLCVData[]>
   ): Promise<Map<string, FetchedOIData[]>> {
     const results = new Map<string, FetchedOIData[]>();
@@ -522,7 +545,12 @@ export class BybitClient {
           logger.info(`[API] Fetching OI ${symbol} from Bybit...`);
           const ohlcvData = ohlcvDataMap?.get(symbol);
           const data = await this.getOpenInterest(symbol, intervalTime, ohlcvData);
-          results.set(symbol, data);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
 
           const withValue = data.filter(d => d.openInterestValue !== undefined).length;
           const valueInfo = ohlcvData ? ` (${withValue} with value)` : '';
@@ -531,7 +559,9 @@ export class BybitClient {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch open interest for ${symbol}`, errorMsg);
-          results.set(symbol, []);
+          if (!onItemFetched) {
+            results.set(symbol, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -539,7 +569,7 @@ export class BybitClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(

@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import { runPromisePool } from '../../utils/promisePool';
+import { RateLimiter } from '../../utils/rateLimiter';
 import {
   OKXAsset,
   OKXInstrumentsResponse,
@@ -8,7 +9,7 @@ import {
   FetchedFundingData,
   OKXKlineResponse,
   FetchedOHLCVData,
-  OKXOpenInterestResponse,
+  // OKXOpenInterestResponse, // unused
   OKXOpenInterestHistoryResponse,
   FetchedOIData,
 } from './types';
@@ -243,7 +244,9 @@ export class OKXClient {
     instIds: string[],
     delayMs: number = 600,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedFundingData[]) => Promise<void>
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
 
@@ -258,7 +261,13 @@ export class OKXClient {
         try {
           logger.info(`[API] Fetching ${instId} from OKX...`);
           const data = await this.getFundingHistory(instId);
-          results.set(instId, data);
+
+          if (onItemFetched) {
+            await onItemFetched(instId, data);
+          } else {
+            results.set(instId, data);
+          }
+
           logger.info(`[API] ✓ ${instId}: ${data.length} records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
@@ -266,7 +275,9 @@ export class OKXClient {
           logger.error(`Failed to fetch funding history for ${instId}`, errorMsg);
 
           // Store empty array for failed instruments to maintain consistency
-          results.set(instId, []);
+          if (!onItemFetched) {
+            results.set(instId, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -274,7 +285,7 @@ export class OKXClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(
@@ -396,7 +407,9 @@ export class OKXClient {
     bar: string = '1H',
     delayMs: number = 600,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedOHLCVData[]) => Promise<void>
   ): Promise<Map<string, FetchedOHLCVData[]>> {
     const results = new Map<string, FetchedOHLCVData[]>();
 
@@ -411,13 +424,21 @@ export class OKXClient {
         try {
           logger.info(`[API] Fetching OHLCV ${symbol} from OKX...`);
           const data = await this.getOHLCV(symbol, bar);
-          results.set(symbol, data);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
           logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
-          results.set(symbol, []);
+          if (!onItemFetched) {
+            results.set(symbol, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -425,7 +446,7 @@ export class OKXClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(
@@ -517,8 +538,11 @@ export class OKXClient {
     period: string = '1H',
     delayMs: number = 600,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedOIData[]) => Promise<void>
   ): Promise<Map<string, FetchedOIData[]>> {
+    void period; // fix unused var
     const results = new Map<string, FetchedOIData[]>();
 
     logger.info(`Fetching open interest data for ${instIds.length} assets from OKX`);
@@ -532,13 +556,21 @@ export class OKXClient {
         try {
           logger.info(`[API] Fetching OI ${instId} from OKX...`);
           const data = await this.getOpenInterest(instId, period);
-          results.set(instId, data);
+
+          if (onItemFetched) {
+            await onItemFetched(instId, data);
+          } else {
+            results.set(instId, data);
+          }
+
           logger.info(`[API] ✓ ${instId}: ${data.length} OI records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${instId}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch open interest for ${instId}`, errorMsg);
-          results.set(instId, []);
+          if (!onItemFetched) {
+            results.set(instId, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -546,7 +578,7 @@ export class OKXClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(

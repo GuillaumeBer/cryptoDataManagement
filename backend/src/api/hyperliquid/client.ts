@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import { runPromisePool } from '../../utils/promisePool';
+import { RateLimiter } from '../../utils/rateLimiter';
 import {
   HyperliquidMetaResponse,
   HyperliquidFundingHistoryResponse,
@@ -113,7 +114,9 @@ export class HyperliquidClient {
     coins: string[],
     delayMs: number = 100,
     concurrency: number = 1,
-    onProgress?: (currentCoin: string, processed: number) => void
+    onProgress?: (currentCoin: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedFundingData[]) => Promise<void>
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
 
@@ -128,12 +131,21 @@ export class HyperliquidClient {
         try {
           logger.info(`[API] Fetching ${coin}...`);
           const data = await this.getFundingHistory(coin);
-          results.set(coin, data);
+
+          // If we have an item callback, use it and don't store in memory
+          if (onItemFetched) {
+            await onItemFetched(coin, data);
+          } else {
+            results.set(coin, data);
+          }
+
           logger.info(`[API] ✓ ${coin}: ${data.length} records`);
         } catch (error) {
           logger.error(`[API] ✗ ${coin}: FAILED`);
           logger.error(`Failed to fetch funding history for ${coin}`, error);
-          results.set(coin, []);
+          if (!onItemFetched) {
+            results.set(coin, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -141,7 +153,7 @@ export class HyperliquidClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 44 } // Approximate weight for Hyperliquid
     );
 
     const totalRecords = Array.from(results.values()).reduce(
@@ -221,7 +233,9 @@ export class HyperliquidClient {
     interval: string = '1h',
     delayMs: number = 2500,
     concurrency: number = 2,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedOHLCVData[]) => Promise<void>
   ): Promise<Map<string, FetchedOHLCVData[]>> {
     const results = new Map<string, FetchedOHLCVData[]>();
 
@@ -236,13 +250,21 @@ export class HyperliquidClient {
         try {
           logger.info(`[API] Fetching OHLCV ${symbol} from Hyperliquid...`);
           const data = await this.getOHLCV(symbol, interval);
-          results.set(symbol, data);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
           logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
-          results.set(symbol, []);
+          if (!onItemFetched) {
+            results.set(symbol, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -250,7 +272,7 @@ export class HyperliquidClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 20 } // Approximate weight
     );
 
     const totalRecords = Array.from(results.values()).reduce(
@@ -333,7 +355,9 @@ export class HyperliquidClient {
     _period?: string | number,
     _delayMs?: number,
     _concurrency?: number,
-    onProgress?: (currentCoin: string, processed: number) => void
+    onProgress?: (currentCoin: string, processed: number) => void,
+    _rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedOIData[]) => Promise<void>
   ): Promise<Map<string, FetchedOIData[]>> {
     const results = new Map<string, FetchedOIData[]>();
 
@@ -345,10 +369,15 @@ export class HyperliquidClient {
     // Filter to requested coins and convert to array format
     for (const coin of coins) {
       const oiData = snapshot.get(coin);
+      let data: FetchedOIData[] = [];
       if (oiData) {
-        results.set(coin, [oiData]); // Wrap in array for consistency with other platforms
+        data = [oiData];
+      }
+
+      if (onItemFetched) {
+        await onItemFetched(coin, data);
       } else {
-        results.set(coin, []);
+        results.set(coin, data);
       }
 
       if (onProgress) {
