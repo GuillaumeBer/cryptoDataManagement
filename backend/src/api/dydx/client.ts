@@ -362,6 +362,18 @@ export class DyDxClient {
     try {
       logger.debug(`Fetching open interest for ${ticker} from DyDx`);
 
+      // Fetch market info to get contract specifications (stepSize)
+      const marketsResponse = await this.client.get<DyDxMarketsResponse>('/perpetualMarkets');
+      const marketInfo = marketsResponse.data.markets[ticker];
+
+      if (!marketInfo) {
+        logger.warn(`Market info not found for ${ticker}`);
+        return [];
+      }
+
+      // stepSize represents the contract size (e.g., 1 BTC for BTC-USD)
+      const contractSize = parseFloat(marketInfo.stepSize);
+
       // Calculate time range: 480 hours ago to match funding rate and OHLCV depth
       const hoursAgo = 480;
       const fromISO = new Date(Date.now() - (hoursAgo * 60 * 60 * 1000)).toISOString();
@@ -382,14 +394,22 @@ export class DyDxClient {
         return [];
       }
 
-      const results: FetchedOIData[] = candles.map((candle) => ({
-        asset: ticker,
-        timestamp: new Date(candle.startedAt),
-        openInterest: candle.startingOpenInterest,
-        openInterestValue: undefined, // DyDx doesn't provide OI value separately
-      }));
+      const results: FetchedOIData[] = candles.map((candle) => {
+        const contractCount = parseFloat(candle.startingOpenInterest);
+        const price = parseFloat(candle.close);
 
-      logger.debug(`Fetched ${results.length} open interest records for ${ticker}`);
+        // Calculate OI value: number of contracts × price × contract size
+        const oiValue = contractCount * price * contractSize;
+
+        return {
+          asset: ticker,
+          timestamp: new Date(candle.startedAt),
+          openInterest: candle.startingOpenInterest,
+          openInterestValue: isNaN(oiValue) ? undefined : oiValue.toString(),
+        };
+      });
+
+      logger.debug(`Fetched ${results.length} open interest records for ${ticker} (contract size: ${contractSize})`);
       return results;
     } catch (error: any) {
       const errorMsg = this.getErrorMessage(error);
@@ -399,10 +419,60 @@ export class DyDxClient {
   }
 
   /**
+   * Helper method to fetch open interest with pre-determined contract size
+   * Used by getOpenInterestBatch to avoid repeated market info fetches
+   */
+  private async getOpenInterestWithContractSize(
+    ticker: string,
+    contractSize: number,
+    resolution: string = '1HOUR'
+  ): Promise<FetchedOIData[]> {
+    // Calculate time range: 480 hours ago to match funding rate and OHLCV depth
+    const hoursAgo = 480;
+    const fromISO = new Date(Date.now() - (hoursAgo * 60 * 60 * 1000)).toISOString();
+    const toISO = new Date().toISOString();
+
+    const response = await this.client.get<DyDxCandlesResponse>(`/candles/perpetualMarkets/${ticker}`, {
+      params: {
+        resolution,
+        fromISO,
+        toISO,
+        limit: 500, // Fetch sufficient data
+      },
+    });
+
+    const candles = response.data.candles;
+    if (!candles || !Array.isArray(candles)) {
+      logger.warn(`No candle data found for ${ticker}`);
+      return [];
+    }
+
+    const results: FetchedOIData[] = candles.map((candle) => {
+      const contractCount = parseFloat(candle.startingOpenInterest);
+      const price = parseFloat(candle.close);
+
+      // Calculate OI value: number of contracts × price × contract size
+      const oiValue = contractCount * price * contractSize;
+
+      return {
+        asset: ticker,
+        timestamp: new Date(candle.startedAt),
+        openInterest: candle.startingOpenInterest,
+        openInterestValue: isNaN(oiValue) ? undefined : oiValue.toString(),
+      };
+    });
+
+    logger.debug(`Fetched ${results.length} open interest records for ${ticker} (contract size: ${contractSize})`);
+    return results;
+  }
+
+  /**
    * Fetch open interest for multiple markets with rate limiting
    *
    * DyDx Rate Limits:
    * - Same endpoint as OHLCV, use conservative delay
+   *
+   * Optimized to fetch market info once and reuse for all tickers
    */
   async getOpenInterestBatch(
     tickers: string[],
@@ -415,6 +485,11 @@ export class DyDxClient {
 
     logger.info(`Fetching open interest data for ${tickers.length} assets from DyDx`);
 
+    // Fetch market info once for all tickers (optimization)
+    logger.info('Fetching market info for contract sizes...');
+    const marketsResponse = await this.client.get<DyDxMarketsResponse>('/perpetualMarkets');
+    const markets = marketsResponse.data.markets;
+
     let processed = 0;
     const safeConcurrency = Math.max(1, concurrency);
 
@@ -423,7 +498,17 @@ export class DyDxClient {
       async (ticker) => {
         try {
           logger.info(`[API] Fetching OI ${ticker} from DyDx...`);
-          const data = await this.getOpenInterest(ticker, resolution);
+
+          // Use the pre-fetched market info
+          const marketInfo = markets[ticker];
+          if (!marketInfo) {
+            logger.warn(`Market info not found for ${ticker}`);
+            results.set(ticker, []);
+            return;
+          }
+
+          const contractSize = parseFloat(marketInfo.stepSize);
+          const data = await this.getOpenInterestWithContractSize(ticker, contractSize, resolution);
           results.set(ticker, data);
           logger.info(`[API] ✓ ${ticker}: ${data.length} OI records`);
         } catch (error) {

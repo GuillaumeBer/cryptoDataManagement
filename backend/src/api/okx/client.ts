@@ -9,6 +9,7 @@ import {
   OKXKlineResponse,
   FetchedOHLCVData,
   OKXOpenInterestResponse,
+  OKXOpenInterestHistoryResponse,
   FetchedOIData,
 } from './types';
 
@@ -437,29 +438,44 @@ export class OKXClient {
   }
 
   /**
-   * Fetch open interest for a specific instrument
-   * Endpoint: GET /api/v5/public/open-interest
+   * Fetch open interest history for a specific instrument
+   * Endpoint: GET /api/v5/rubik/stat/contracts/open-interest-history
    *
    * API Documentation:
-   * - Returns open interest data with optional historical period
+   * - Returns historical open interest data
    * - Supports periods: 5m, 1H, 1D
+   * - Returns up to 100 data points per request
+   * - For 30 days of data, we use period='1D' with limit=30 (most efficient)
    *
    * Rate Limits:
    * - 20 requests per 2 seconds (~600 req/min)
+   *
+   * Response Format:
+   * - Array of arrays: [timestamp, oi_contracts, oi_base_ccy, oi_usd_value]
+   *
+   * Note: The 'before' pagination parameter doesn't work reliably for this endpoint,
+   * so we use daily granularity (1D) to fetch 30 days of data in a single request.
+   *
+   * @param instId - Instrument ID (e.g., "BTC-USDT-SWAP")
+   * @param period - Time period (ignored, always uses '1D' for 30 days of data)
+   * @returns Array of open interest data points (30 days of daily data)
    */
   async getOpenInterest(instId: string, period: string = '1H'): Promise<FetchedOIData[]> {
     try {
-      logger.debug(`Fetching open interest for ${instId} from OKX`);
+      logger.debug(`Fetching open interest history for ${instId} from OKX (30 days of daily data)`);
 
-      // OKX returns last 100 data points for the specified period
-      // For 1H period, this gives us ~100 hours of data
-      // We'll need to make multiple calls or use current snapshot
-      const response = await this.client.get<OKXOpenInterestResponse>('/api/v5/public/open-interest', {
-        params: {
-          instId,
-          period, // '1H' for 1-hour data points
-        },
-      });
+      // For 30 days of historical data, use 1D period with limit=30
+      // This is the most efficient and reliable approach
+      const response = await this.client.get<OKXOpenInterestHistoryResponse>(
+        '/api/v5/rubik/stat/contracts/open-interest-history',
+        {
+          params: {
+            instId,
+            period: '1D', // Daily data for 30 days
+            limit: '30',  // 30 days
+          },
+        }
+      );
 
       // Check if request was successful
       if (response.data.code !== '0') {
@@ -467,24 +483,25 @@ export class OKXClient {
       }
 
       const oiData = response.data.data;
-      if (!oiData || !Array.isArray(oiData)) {
-        logger.warn(`No open interest data found for ${instId}`);
+      if (!oiData || !Array.isArray(oiData) || oiData.length === 0) {
+        logger.warn(`No open interest history found for ${instId}`);
         return [];
       }
 
+      // Parse the array format: [timestamp, oi_contracts, oi_base_ccy, oi_usd_value]
       const results: FetchedOIData[] = oiData.map((point) => ({
         asset: instId,
-        timestamp: new Date(parseInt(point.ts)),
-        openInterest: point.oi,
-        openInterestValue: point.oiCcy,
+        timestamp: new Date(parseInt(point[0])),
+        openInterest: point[1], // OI in contracts
+        openInterestValue: point[3], // OI value in USD
       }));
 
-      logger.debug(`Fetched ${results.length} open interest records for ${instId}`);
+      logger.debug(`Fetched ${results.length} open interest history records for ${instId} (spanning ~${results.length} days)`);
       return results;
     } catch (error: any) {
       const errorMsg = this.getErrorMessage(error);
-      logger.error(`Failed to fetch open interest for ${instId}: ${errorMsg}`);
-      throw new Error(`Failed to fetch open interest for ${instId}: ${errorMsg}`);
+      logger.error(`Failed to fetch open interest history for ${instId}: ${errorMsg}`);
+      throw new Error(`Failed to fetch open interest history for ${instId}: ${errorMsg}`);
     }
   }
 

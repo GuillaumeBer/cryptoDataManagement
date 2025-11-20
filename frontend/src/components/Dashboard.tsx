@@ -226,9 +226,12 @@ export default function Dashboard() {
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                   <FundingRateChart asset={selectedAsset} platform={selectedPlatform} />
                 </div>
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                  <OpenInterestChart asset={selectedAsset} platform={selectedPlatform} />
-                </div>
+                {/* Hide OI chart for snapshot-only platforms (Hyperliquid, Aster) */}
+                {selectedPlatform !== 'hyperliquid' && selectedPlatform !== 'aster' && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <OpenInterestChart asset={selectedAsset} platform={selectedPlatform} />
+                  </div>
+                )}
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                   <OHLCVChart asset={selectedAsset} platform={selectedPlatform} />
                 </div>

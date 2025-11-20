@@ -96,6 +96,16 @@ export interface OKXOpenInterestResponse {
   data: OKXOpenInterest[];
 }
 
+// Historical Open Interest response type
+// Data format: Array of [timestamp, oi_contracts, oi_base_ccy, oi_usd_value]
+export type OKXOpenInterestHistoryData = [string, string, string, string];
+
+export interface OKXOpenInterestHistoryResponse {
+  code: string; // "0" for success
+  msg: string;
+  data: OKXOpenInterestHistoryData[];
+}
+
 export interface FetchedOIData {
   asset: string;
   timestamp: Date;

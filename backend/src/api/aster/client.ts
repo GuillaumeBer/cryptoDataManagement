@@ -323,50 +323,50 @@ export class AsterClient {
   }
 
   /**
-   * Fetch open interest history for a specific symbol
-   * Endpoint: GET /futures/data/openInterestHist (Binance-compatible)
+   * Fetch open interest for a specific symbol
+   * Endpoint: GET /fapi/v1/openInterest (Binance-compatible)
    *
-   * Notes:
-   * - The realtime /fapi/v1/openInterest endpoint only returns a single point.
-   * - We need the historical endpoint to populate the chart.
-   * - Supports periods: 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d
-   * - Max limit: 500 records per request
+   * IMPORTANT: Aster does NOT have a historical OI endpoint like Binance
+   * (/futures/data/openInterestHist returns 404).
+   *
+   * Instead, we use the real-time endpoint /fapi/v1/openInterest which returns
+   * a single snapshot:
+   * {
+   *   "symbol": "BTCUSDT",
+   *   "openInterest": "5458.092",
+   *   "time": 1763619371908
+   * }
+   *
+   * Historical data will be built up over time as we periodically fetch snapshots.
    */
   async getOpenInterest(symbol: string, period: string = '1h'): Promise<FetchedOIData[]> {
     try {
-      logger.debug(`Fetching open interest history for ${symbol} from Aster`);
+      logger.debug(`Fetching open interest snapshot for ${symbol} from Aster`);
 
-      // Calculate time range: 480 hours ago to match funding rate and OHLCV depth
-      const hoursAgo = 480;
-      const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
-      const endTime = Date.now();
+      // Use the real-time endpoint (only endpoint available)
+      const response = await this.client.get<{ symbol: string; openInterest: string; time: number }>(
+        '/fapi/v1/openInterest',
+        {
+          params: { symbol },
+        }
+      );
 
-      const response = await this.client.get<AsterOpenInterest[]>('/futures/data/openInterestHist', {
-        params: {
-          symbol,
-          period,
-          contractType: 'PERPETUAL',
-          startTime,
-          endTime,
-          limit: 500, // Max allowed (Binance-compatible)
-        },
-      });
-
-      const oiData = response.data;
-      if (!oiData || !Array.isArray(oiData)) {
+      const oiSnapshot = response.data;
+      if (!oiSnapshot || !oiSnapshot.openInterest) {
         logger.warn(`No open interest data found for ${symbol}`);
         return [];
       }
 
-      const results: FetchedOIData[] = oiData.map((point) => ({
+      // Return a single data point (the current snapshot)
+      const result: FetchedOIData = {
         asset: symbol,
-        timestamp: new Date(point.timestamp),
-        openInterest: point.sumOpenInterest,
-        openInterestValue: point.sumOpenInterestValue,
-      }));
+        timestamp: new Date(oiSnapshot.time),
+        openInterest: oiSnapshot.openInterest,
+        openInterestValue: undefined, // Not provided by Aster
+      };
 
-      logger.debug(`Fetched ${results.length} open interest records for ${symbol}`);
-      return results;
+      logger.debug(`Fetched open interest snapshot for ${symbol}: OI=${oiSnapshot.openInterest}`);
+      return [result];
     } catch (error: any) {
       // Handle 404 errors gracefully - some symbols don't have OI data
       if (axios.isAxiosError(error) && error.response?.status === 404) {
@@ -381,7 +381,11 @@ export class AsterClient {
   }
 
   /**
-   * Fetch open interest history for multiple symbols with rate limiting
+   * Fetch open interest snapshots for multiple symbols with rate limiting
+   *
+   * NOTE: Unlike other platforms, Aster only provides real-time snapshots,
+   * not historical data. Each call returns a single data point per symbol.
+   * Historical data is built up over time through periodic fetches.
    *
    * Aster Rate Limits:
    * - Exact limits unknown, using conservative delay

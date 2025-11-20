@@ -352,6 +352,59 @@ export class BybitClient {
   }
 
   /**
+   * Helper function to find the closest OHLCV price for a given timestamp
+   * Used to calculate OI value from OI contracts
+   */
+  private findClosestPrice(timestamp: Date, ohlcvData: FetchedOHLCVData[]): string | undefined {
+    if (!ohlcvData || ohlcvData.length === 0) {
+      return undefined;
+    }
+
+    const targetTime = timestamp.getTime();
+
+    // Find the closest OHLCV record (within 1 hour tolerance)
+    let closestRecord: FetchedOHLCVData | undefined;
+    let minTimeDiff = Infinity;
+    const ONE_HOUR = 60 * 60 * 1000;
+
+    for (const record of ohlcvData) {
+      const recordTime = record.timestamp.getTime();
+      const timeDiff = Math.abs(targetTime - recordTime);
+
+      // Only consider records within 1 hour of the OI timestamp
+      if (timeDiff <= ONE_HOUR && timeDiff < minTimeDiff) {
+        minTimeDiff = timeDiff;
+        closestRecord = record;
+      }
+    }
+
+    return closestRecord?.close;
+  }
+
+  /**
+   * Calculate OI value from OI contracts using OHLCV price data
+   */
+  private calculateOIValue(openInterest: string, price: string | undefined): string | undefined {
+    if (!price) {
+      return undefined;
+    }
+
+    try {
+      const oiContracts = parseFloat(openInterest);
+      const priceValue = parseFloat(price);
+
+      if (isNaN(oiContracts) || isNaN(priceValue)) {
+        return undefined;
+      }
+
+      const oiValue = oiContracts * priceValue;
+      return oiValue.toString();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Fetch open interest history for a specific symbol
    * Endpoint: GET /v5/market/open-interest
    *
@@ -361,8 +414,16 @@ export class BybitClient {
    *
    * Rate Limits:
    * - 50 requests per 2 seconds (~1500 req/min)
+   *
+   * @param symbol - Trading pair symbol (e.g., "BTCUSDT")
+   * @param intervalTime - Time interval for OI data (default: "1h")
+   * @param ohlcvData - Optional OHLCV data to calculate OI value from contracts
    */
-  async getOpenInterest(symbol: string, intervalTime: string = '1h'): Promise<FetchedOIData[]> {
+  async getOpenInterest(
+    symbol: string,
+    intervalTime: string = '1h',
+    ohlcvData?: FetchedOHLCVData[]
+  ): Promise<FetchedOIData[]> {
     try {
       logger.debug(`Fetching open interest history for ${symbol} from Bybit`);
 
@@ -393,14 +454,27 @@ export class BybitClient {
         return [];
       }
 
-      const results: FetchedOIData[] = oiData.map((point) => ({
-        asset: symbol,
-        timestamp: new Date(parseInt(point.timestamp)),
-        openInterest: point.openInterest,
-        openInterestValue: undefined, // Bybit doesn't provide OI value in this endpoint
-      }));
+      const results: FetchedOIData[] = oiData.map((point) => {
+        const timestamp = new Date(parseInt(point.timestamp));
+        const openInterest = point.openInterest;
 
-      logger.debug(`Fetched ${results.length} open interest records for ${symbol}`);
+        // Calculate OI value if OHLCV data is provided
+        let openInterestValue: string | undefined;
+        if (ohlcvData) {
+          const price = this.findClosestPrice(timestamp, ohlcvData);
+          openInterestValue = this.calculateOIValue(openInterest, price);
+        }
+
+        return {
+          asset: symbol,
+          timestamp,
+          openInterest,
+          openInterestValue,
+        };
+      });
+
+      const withValue = results.filter(r => r.openInterestValue !== undefined).length;
+      logger.debug(`Fetched ${results.length} open interest records for ${symbol} (${withValue} with calculated value)`);
       return results;
     } catch (error: any) {
       const errorMsg = this.getErrorMessage(error);
@@ -415,17 +489,28 @@ export class BybitClient {
    * Bybit Rate Limits:
    * - /v5/market/open-interest endpoint: 50 requests per 2 seconds
    * - Conservative delay: 600ms (100 requests/min) to stay well within limits
+   *
+   * @param symbols - Array of trading pair symbols
+   * @param intervalTime - Time interval for OI data (default: "1h")
+   * @param delayMs - Delay between requests in milliseconds
+   * @param concurrency - Number of concurrent requests
+   * @param onProgress - Optional callback for progress tracking
+   * @param ohlcvDataMap - Optional map of symbol -> OHLCV data for calculating OI values
    */
   async getOpenInterestBatch(
     symbols: string[],
     intervalTime: string = '1h',
     delayMs: number = 600,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    ohlcvDataMap?: Map<string, FetchedOHLCVData[]>
   ): Promise<Map<string, FetchedOIData[]>> {
     const results = new Map<string, FetchedOIData[]>();
 
     logger.info(`Fetching open interest data for ${symbols.length} assets from Bybit`);
+    if (ohlcvDataMap) {
+      logger.info(`Using OHLCV data to calculate OI values for ${ohlcvDataMap.size} symbols`);
+    }
 
     let processed = 0;
     const safeConcurrency = Math.max(1, concurrency);
@@ -435,9 +520,13 @@ export class BybitClient {
       async (symbol) => {
         try {
           logger.info(`[API] Fetching OI ${symbol} from Bybit...`);
-          const data = await this.getOpenInterest(symbol, intervalTime);
+          const ohlcvData = ohlcvDataMap?.get(symbol);
+          const data = await this.getOpenInterest(symbol, intervalTime, ohlcvData);
           results.set(symbol, data);
-          logger.info(`[API] ✓ ${symbol}: ${data.length} OI records`);
+
+          const withValue = data.filter(d => d.openInterestValue !== undefined).length;
+          const valueInfo = ohlcvData ? ` (${withValue} with value)` : '';
+          logger.info(`[API] ✓ ${symbol}: ${data.length} OI records${valueInfo}`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
@@ -457,7 +546,11 @@ export class BybitClient {
       (sum, data) => sum + data.length,
       0
     );
-    logger.info(`Fetched total of ${totalRecords} open interest records from Bybit`);
+    const totalWithValue = Array.from(results.values()).reduce(
+      (sum, data) => sum + data.filter(d => d.openInterestValue !== undefined).length,
+      0
+    );
+    logger.info(`Fetched total of ${totalRecords} open interest records from Bybit (${totalWithValue} with calculated value)`);
 
     return results;
   }
