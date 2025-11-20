@@ -23,7 +23,21 @@
       "Bash(timeout /t 3 /nobreak)",
       "Bash(timeout /t 10 /nobreak)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(tee:*)",
+      "Bash(docker exec:*)",
+      "Bash(net stop:*)",
+      "Bash(sc query:*)",
+      "Bash(wmic service:*)",
+      "Bash(docker-compose restart:*)",
+      "Bash(docker-compose down:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(docker ps:*)",
+      "Bash(psql:*)",
+      "Bash(npx kill-port:*)",
+      "Bash(timeout /t 30 /nobreak)",
+      "Bash(timeout 2 npx tsx:*)"
     ],
     "deny": [],
     "ask": []

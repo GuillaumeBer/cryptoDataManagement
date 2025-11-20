@@ -49,6 +49,17 @@ export class AsterClient {
   private getErrorMessage(error: unknown): string {
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError;
+      const status = axiosError.response?.status;
+      const statusText = axiosError.response?.statusText;
+
+      // Check if response data is HTML (common for 404 errors)
+      const data = axiosError.response?.data;
+      const isHtml = typeof data === 'string' && data.trim().startsWith('<!DOCTYPE html>');
+
+      if (isHtml) {
+        return `${axiosError.message} (${status} ${statusText})`;
+      }
+
       return axiosError.response?.data
         ? `${axiosError.message}: ${JSON.stringify(axiosError.response.data).substring(0, 200)}`
         : axiosError.message;
@@ -313,15 +324,13 @@ export class AsterClient {
 
   /**
    * Fetch open interest history for a specific symbol
-   * Endpoint: GET /fapi/v1/openInterest
+   * Endpoint: GET /futures/data/openInterestHist (Binance-compatible)
    *
-   * API Documentation:
-   * - Aster uses Binance-compatible API
+   * Notes:
+   * - The realtime /fapi/v1/openInterest endpoint only returns a single point.
+   * - We need the historical endpoint to populate the chart.
    * - Supports periods: 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d
    * - Max limit: 500 records per request
-   *
-   * Rate Limits:
-   * - Conservative delay to match other endpoints
    */
   async getOpenInterest(symbol: string, period: string = '1h'): Promise<FetchedOIData[]> {
     try {
@@ -332,10 +341,11 @@ export class AsterClient {
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
       const endTime = Date.now();
 
-      const response = await this.client.get<AsterOpenInterest[]>('/fapi/v1/openInterest', {
+      const response = await this.client.get<AsterOpenInterest[]>('/futures/data/openInterestHist', {
         params: {
           symbol,
           period,
+          contractType: 'PERPETUAL',
           startTime,
           endTime,
           limit: 500, // Max allowed (Binance-compatible)
@@ -358,6 +368,12 @@ export class AsterClient {
       logger.debug(`Fetched ${results.length} open interest records for ${symbol}`);
       return results;
     } catch (error: any) {
+      // Handle 404 errors gracefully - some symbols don't have OI data
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        logger.debug(`No open interest data available for ${symbol} (404 Not Found)`);
+        return [];
+      }
+
       const errorMsg = this.getErrorMessage(error);
       logger.error(`Failed to fetch open interest for ${symbol}: ${errorMsg}`);
       throw new Error(`Failed to fetch open interest for ${symbol}: ${errorMsg}`);
@@ -394,7 +410,11 @@ export class AsterClient {
           logger.info(`[API] Fetching OI ${symbol} from Aster...`);
           const data = await this.getOpenInterest(symbol, period);
           results.set(symbol, data);
-          logger.info(`[API] ✓ ${symbol}: ${data.length} OI records`);
+          if (data.length > 0) {
+            logger.info(`[API] ✓ ${symbol}: ${data.length} OI records`);
+          } else {
+            logger.debug(`[API] ○ ${symbol}: No OI data available`);
+          }
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);

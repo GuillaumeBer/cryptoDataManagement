@@ -36,6 +36,17 @@ export class BinanceClient {
   private getErrorMessage(error: unknown): string {
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError;
+      const status = axiosError.response?.status;
+      const statusText = axiosError.response?.statusText;
+
+      // Check if response data is HTML (common for 404 errors)
+      const data = axiosError.response?.data;
+      const isHtml = typeof data === 'string' && data.trim().startsWith('<!DOCTYPE html>');
+
+      if (isHtml) {
+        return `${axiosError.message} (${status} ${statusText})`;
+      }
+
       return axiosError.response?.data
         ? `${axiosError.message}: ${JSON.stringify(axiosError.response.data).substring(0, 200)}`
         : axiosError.message;
@@ -299,10 +310,10 @@ export class BinanceClient {
 
   /**
    * Fetch open interest history for a specific symbol
-   * Endpoint: GET /fapi/v1/openInterest
+   * Endpoint: GET /futures/data/openInterestHist
    *
    * API Documentation:
-   * - Can be used to get current OI or historical OI with time range
+   * - Historical OI endpoint (not the realtime /fapi/v1/openInterest)
    * - Supports periods: 5m, 15m, 30m, 1h, 2h, 4h, 6h, 12h, 1d
    * - Max limit: 500 records per request
    *
@@ -319,15 +330,19 @@ export class BinanceClient {
       const startTime = Date.now() - (hoursAgo * 60 * 60 * 1000);
       const endTime = Date.now();
 
-      const response = await this.client.get<BinanceOpenInterest[]>('/fapi/v1/openInterest', {
-        params: {
-          symbol,
-          period,
-          startTime,
-          endTime,
-          limit: 500, // Max allowed by Binance
-        },
-      });
+      const response = await this.client.get<BinanceOpenInterest[]>(
+        '/futures/data/openInterestHist',
+        {
+          params: {
+            symbol,
+            period,
+            contractType: 'PERPETUAL',
+            startTime,
+            endTime,
+            limit: 500, // Max allowed by Binance
+          },
+        }
+      );
 
       const oiData = response.data;
       if (!oiData || !Array.isArray(oiData)) {
@@ -345,6 +360,12 @@ export class BinanceClient {
       logger.debug(`Fetched ${results.length} open interest records for ${symbol}`);
       return results;
     } catch (error: any) {
+      // Handle 404 errors gracefully - some symbols don't have OI data
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        logger.debug(`No open interest data available for ${symbol} (404 Not Found)`);
+        return [];
+      }
+
       const errorMsg = this.getErrorMessage(error);
       logger.error(`Failed to fetch open interest for ${symbol}: ${errorMsg}`);
       throw new Error(`Failed to fetch open interest for ${symbol}: ${errorMsg}`);
@@ -355,7 +376,7 @@ export class BinanceClient {
    * Fetch open interest history for multiple symbols with rate limiting
    *
    * Binance Rate Limits:
-   * - /fapi/v1/openInterest endpoint: Weight 1, 2400 requests per minute
+   * - /futures/data/openInterestHist endpoint: Weight 1, 2400 requests per minute
    * - Very high limit, using same conservative delay as other endpoints
    *
    * Default Strategy:
@@ -382,7 +403,11 @@ export class BinanceClient {
           logger.info(`[API] Fetching OI ${symbol} from Binance...`);
           const data = await this.getOpenInterest(symbol, period);
           results.set(symbol, data);
-          logger.info(`[API] ✓ ${symbol}: ${data.length} OI records`);
+          if (data.length > 0) {
+            logger.info(`[API] ✓ ${symbol}: ${data.length} OI records`);
+          } else {
+            logger.debug(`[API] ○ ${symbol}: No OI data available`);
+          }
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
