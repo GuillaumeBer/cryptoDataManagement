@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import { runPromisePool } from '../../utils/promisePool';
+import { RateLimiter } from '../../utils/rateLimiter';
 import {
   AsterAsset,
   AsterExchangeInfo,
@@ -8,7 +9,7 @@ import {
   FetchedFundingData,
   AsterKline,
   FetchedOHLCVData,
-  AsterOpenInterest,
+  // AsterOpenInterest, // unused
   FetchedOIData,
 } from './types';
 
@@ -166,7 +167,9 @@ export class AsterClient {
     symbols: string[],
     delayMs: number = 700,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedFundingData[]) => Promise<void>
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
 
@@ -181,13 +184,21 @@ export class AsterClient {
         try {
           logger.info(`[API] Fetching ${symbol} from Aster...`);
           const data = await this.getFundingHistory(symbol);
-          results.set(symbol, data);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
           logger.info(`[API] ✓ ${symbol}: ${data.length} records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch funding history for ${symbol}`, errorMsg);
-          results.set(symbol, []);
+          if (!onItemFetched) {
+            results.set(symbol, []);
+          }
         } finally {
           processed++;
           // Emit progress callback
@@ -196,7 +207,7 @@ export class AsterClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(
@@ -281,7 +292,9 @@ export class AsterClient {
     interval: string = '1h',
     delayMs: number = 700,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedOHLCVData[]) => Promise<void>
   ): Promise<Map<string, FetchedOHLCVData[]>> {
     const results = new Map<string, FetchedOHLCVData[]>();
 
@@ -296,13 +309,21 @@ export class AsterClient {
         try {
           logger.info(`[API] Fetching OHLCV ${symbol} from Aster...`);
           const data = await this.getOHLCV(symbol, interval);
-          results.set(symbol, data);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
           logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
-          results.set(symbol, []);
+          if (!onItemFetched) {
+            results.set(symbol, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -310,7 +331,7 @@ export class AsterClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(
@@ -398,8 +419,12 @@ export class AsterClient {
     period: string = '1h',
     delayMs: number = 700,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedOIData[]) => Promise<void>
   ): Promise<Map<string, FetchedOIData[]>> {
+    // Fix unused param warning
+    void period;
     const results = new Map<string, FetchedOIData[]>();
 
     logger.info(`Fetching open interest data for ${symbols.length} assets from Aster`);
@@ -413,7 +438,13 @@ export class AsterClient {
         try {
           logger.info(`[API] Fetching OI ${symbol} from Aster...`);
           const data = await this.getOpenInterest(symbol, period);
-          results.set(symbol, data);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
           if (data.length > 0) {
             logger.info(`[API] ✓ ${symbol}: ${data.length} OI records`);
           } else {
@@ -423,7 +454,9 @@ export class AsterClient {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch open interest for ${symbol}`, errorMsg);
-          results.set(symbol, []);
+          if (!onItemFetched) {
+            results.set(symbol, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -431,7 +464,7 @@ export class AsterClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(

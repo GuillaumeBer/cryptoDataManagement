@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import { runPromisePool } from '../../utils/promisePool';
+import { RateLimiter } from '../../utils/rateLimiter';
 import {
   BinanceAsset,
   BinanceExchangeInfo,
@@ -152,7 +153,9 @@ export class BinanceClient {
     symbols: string[],
     delayMs: number = 700, // 700ms = ~86 req/min, providing 14% safety margin under 100 req/min limit
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedFundingData[]) => Promise<void>
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
 
@@ -167,13 +170,21 @@ export class BinanceClient {
         try {
           logger.info(`[API] Fetching ${symbol} from Binance...`);
           const data = await this.getFundingHistory(symbol);
-          results.set(symbol, data);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
           logger.info(`[API] ✓ ${symbol}: ${data.length} records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch funding history for ${symbol}`, errorMsg);
-          results.set(symbol, []);
+          if (!onItemFetched) {
+            results.set(symbol, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -181,7 +192,7 @@ export class BinanceClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(
@@ -267,7 +278,9 @@ export class BinanceClient {
     interval: string = '1h',
     delayMs: number = 700,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedOHLCVData[]) => Promise<void>
   ): Promise<Map<string, FetchedOHLCVData[]>> {
     const results = new Map<string, FetchedOHLCVData[]>();
 
@@ -282,13 +295,21 @@ export class BinanceClient {
         try {
           logger.info(`[API] Fetching OHLCV ${symbol} from Binance...`);
           const data = await this.getOHLCV(symbol, interval);
-          results.set(symbol, data);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
           logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
-          results.set(symbol, []);
+          if (!onItemFetched) {
+            results.set(symbol, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -296,7 +317,7 @@ export class BinanceClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 5 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(
@@ -387,7 +408,9 @@ export class BinanceClient {
     period: string = '1h',
     delayMs: number = 700,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedOIData[]) => Promise<void>
   ): Promise<Map<string, FetchedOIData[]>> {
     const results = new Map<string, FetchedOIData[]>();
 
@@ -402,7 +425,13 @@ export class BinanceClient {
         try {
           logger.info(`[API] Fetching OI ${symbol} from Binance...`);
           const data = await this.getOpenInterest(symbol, period);
-          results.set(symbol, data);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
           if (data.length > 0) {
             logger.info(`[API] ✓ ${symbol}: ${data.length} OI records`);
           } else {
@@ -412,7 +441,9 @@ export class BinanceClient {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch open interest for ${symbol}`, errorMsg);
-          results.set(symbol, []);
+          if (!onItemFetched) {
+            results.set(symbol, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -420,7 +451,7 @@ export class BinanceClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(
