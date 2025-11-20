@@ -445,7 +445,7 @@ export class DataFetcherService extends EventEmitter {
       case 'hyperliquid':
         return 5;
       case 'binance':
-        return 2;
+        return 1;
       case 'bybit':
         return 10;
       case 'okx':
