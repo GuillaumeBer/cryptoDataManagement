@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { logger } from '../../utils/logger';
 import { runPromisePool } from '../../utils/promisePool';
+import { RateLimiter } from '../../utils/rateLimiter';
 import {
   DyDxAsset,
   DyDxMarketsResponse,
@@ -198,7 +199,9 @@ export class DyDxClient {
     tickers: string[],
     delayMs: number = 100,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedFundingData[]) => Promise<void>
   ): Promise<Map<string, FetchedFundingData[]>> {
     const results = new Map<string, FetchedFundingData[]>();
 
@@ -213,7 +216,13 @@ export class DyDxClient {
         try {
           logger.info(`[API] Fetching ${ticker} from DyDx V4...`);
           const data = await this.getFundingHistory(ticker);
-          results.set(ticker, data);
+
+          if (onItemFetched) {
+            await onItemFetched(ticker, data);
+          } else {
+            results.set(ticker, data);
+          }
+
           logger.info(`[API] ✓ ${ticker}: ${data.length} records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
@@ -221,7 +230,9 @@ export class DyDxClient {
           logger.error(`Failed to fetch funding history for ${ticker}`, errorMsg);
 
           // Store empty array for failed tickers to maintain consistency
-          results.set(ticker, []);
+          if (!onItemFetched) {
+            results.set(ticker, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -229,7 +240,7 @@ export class DyDxClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(
@@ -309,7 +320,9 @@ export class DyDxClient {
     resolution: string = '1HOUR',
     delayMs: number = 500,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedOHLCVData[]) => Promise<void>
   ): Promise<Map<string, FetchedOHLCVData[]>> {
     const results = new Map<string, FetchedOHLCVData[]>();
 
@@ -324,13 +337,21 @@ export class DyDxClient {
         try {
           logger.info(`[API] Fetching OHLCV ${symbol} from DyDx...`);
           const data = await this.getOHLCV(symbol, resolution);
-          results.set(symbol, data);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
           logger.info(`[API] ✓ ${symbol}: ${data.length} OHLCV records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch OHLCV for ${symbol}`, errorMsg);
-          results.set(symbol, []);
+          if (!onItemFetched) {
+            results.set(symbol, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -338,7 +359,7 @@ export class DyDxClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(
@@ -479,7 +500,9 @@ export class DyDxClient {
     resolution: string = '1HOUR',
     delayMs: number = 500,
     concurrency: number = 1,
-    onProgress?: (currentSymbol: string, processed: number) => void
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedOIData[]) => Promise<void>
   ): Promise<Map<string, FetchedOIData[]>> {
     const results = new Map<string, FetchedOIData[]>();
 
@@ -503,19 +526,32 @@ export class DyDxClient {
           const marketInfo = markets[ticker];
           if (!marketInfo) {
             logger.warn(`Market info not found for ${ticker}`);
-            results.set(ticker, []);
+
+            if (onItemFetched) {
+              // Skip if not found
+            } else {
+              results.set(ticker, []);
+            }
             return;
           }
 
           const contractSize = parseFloat(marketInfo.stepSize);
           const data = await this.getOpenInterestWithContractSize(ticker, contractSize, resolution);
-          results.set(ticker, data);
+
+          if (onItemFetched) {
+            await onItemFetched(ticker, data);
+          } else {
+            results.set(ticker, data);
+          }
+
           logger.info(`[API] ✓ ${ticker}: ${data.length} OI records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           logger.error(`[API] ✗ ${ticker}: FAILED - ${errorMsg}`);
           logger.error(`Failed to fetch open interest for ${ticker}`, errorMsg);
-          results.set(ticker, []);
+          if (!onItemFetched) {
+            results.set(ticker, []);
+          }
         } finally {
           processed++;
           if (onProgress) {
@@ -523,7 +559,7 @@ export class DyDxClient {
           }
         }
       },
-      { concurrency: safeConcurrency, delayMs }
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
     );
 
     const totalRecords = Array.from(results.values()).reduce(
