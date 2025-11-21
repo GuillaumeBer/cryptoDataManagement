@@ -9,6 +9,7 @@ import type {
   ApiResponse,
   OHLCVRecord,
   OpenInterestRecord,
+  LongShortRatioRecord,
 } from '../types';
 
 class ApiClient {
@@ -128,6 +129,31 @@ class ApiClient {
     }
 
     const response = await this.client.get<ApiResponse<OpenInterestRecord[]>>('/open-interest', {
+      params: queryParams,
+    });
+    return response.data.data ?? [];
+  }
+
+  // Long/Short Ratio endpoints
+  async getLongShortRatios(params: {
+    asset?: string;
+    platform?: string;
+    timeframe?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+    offset?: number;
+  }): Promise<LongShortRatioRecord[]> {
+    const queryParams: Record<string, any> = { ...params };
+
+    if (queryParams.startDate) {
+      queryParams.startDate = queryParams.startDate.toISOString();
+    }
+    if (queryParams.endDate) {
+      queryParams.endDate = queryParams.endDate.toISOString();
+    }
+
+    const response = await this.client.get<ApiResponse<LongShortRatioRecord[]>>('/long-short-ratios', {
       params: queryParams,
     });
     return response.data.data ?? [];

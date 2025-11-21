@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import type { UnifiedAsset } from '../types';
 import { PLATFORMS } from '../constants/platforms';
 import { useUnifiedAssets } from '../hooks/useUnifiedAssets';
 
@@ -252,31 +251,28 @@ export default function AssetCoverageView() {
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <p className="text-xs text-gray-500 mb-1">
-                          {asset.platform_count} / {totalEnabledPlatforms} platforms
-                        </p>
-                        <div className="h-2 rounded-full bg-gray-100">
-                          <div
-                            className="h-full rounded-full bg-blue-500"
-                            style={{ width: `${coveragePercent}%` }}
-                          />
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 bg-gray-200 rounded-full h-1.5">
+                            <div
+                              className="bg-green-500 h-1.5 rounded-full"
+                              style={{ width: `${coveragePercent}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-gray-500">{asset.platform_count}/{totalEnabledPlatforms}</span>
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex flex-col gap-1">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                            asset.avg_confidence >= 98 ? 'bg-green-100 text-green-700' :
-                            asset.avg_confidence >= 90 ? 'bg-yellow-100 text-yellow-700' :
-                            'bg-gray-100 text-gray-600'
+                        {hasCorrelation ? (
+                          <span className={`text-xs font-medium ${
+                            correlationValue! > 0.9 ? 'text-green-600' :
+                            correlationValue! > 0.7 ? 'text-blue-600' :
+                            'text-orange-600'
                           }`}>
-                            {asset.avg_confidence}% confidence
+                            {(correlationValue! * 100).toFixed(0)}% match
                           </span>
-                          {hasCorrelation && correlationValue && (
-                            <span className="text-xs text-gray-500">
-                              r={correlationValue.toFixed(3)}
-                            </span>
-                          )}
-                        </div>
+                        ) : (
+                          <span className="text-xs text-gray-400">-</span>
+                        )}
                       </td>
                     </tr>
                   );

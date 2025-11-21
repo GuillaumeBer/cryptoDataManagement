@@ -79,6 +79,25 @@ CREATE INDEX IF NOT EXISTS idx_oi_asset_time ON open_interest_data(asset_id, tim
 CREATE INDEX IF NOT EXISTS idx_oi_timeframe ON open_interest_data(timeframe);
 CREATE INDEX IF NOT EXISTS idx_oi_platform_timeframe ON open_interest_data(platform, timeframe);
 
+-- Long/short ratios provide sentiment snapshots for platforms and assets
+CREATE TABLE IF NOT EXISTS long_short_ratios (
+  id SERIAL PRIMARY KEY,
+  asset_id INTEGER NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+  timestamp TIMESTAMPTZ NOT NULL,
+  long_ratio NUMERIC NOT NULL,
+  short_ratio NUMERIC NOT NULL,
+  long_account NUMERIC,
+  short_account NUMERIC,
+  platform VARCHAR(50) NOT NULL,
+  type VARCHAR(50) NOT NULL DEFAULT 'global_account',
+  period VARCHAR(20) NOT NULL DEFAULT '1h',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT uq_ls_ratio_asset_ts_type UNIQUE (asset_id, timestamp, platform, type, period)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ls_ratios_asset_ts ON long_short_ratios(asset_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_ls_ratios_platform_ts ON long_short_ratios(platform, timestamp DESC);
+
 -- Fetch logs table: tracks data fetch operations
 CREATE TABLE IF NOT EXISTS fetch_logs (
   id SERIAL PRIMARY KEY,

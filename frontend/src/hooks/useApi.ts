@@ -69,6 +69,23 @@ export function useOpenInterestData(params: {
   });
 }
 
+// Long/Short Ratio hooks
+export function useLongShortRatios(params: {
+  asset?: string;
+  platform?: string;
+  timeframe?: string;
+  startDate?: Date;
+  endDate?: Date;
+  limit?: number;
+  offset?: number;
+}) {
+  return useQuery({
+    queryKey: ['long-short-ratios', params],
+    queryFn: () => apiClient.getLongShortRatios(params),
+    enabled: !!params.asset,
+  });
+}
+
 // Analytics hooks
 export function useAssetAnalytics(asset: string | null, platform: string = 'hyperliquid') {
   return useQuery({
@@ -97,6 +114,10 @@ export function useInitialFetch() {
       queryClient.invalidateQueries({ queryKey: ['status'] });
       queryClient.invalidateQueries({ queryKey: ['assets'] });
       queryClient.invalidateQueries({ queryKey: ['logs'] });
+      queryClient.invalidateQueries({ queryKey: ['funding-rates'] });
+      queryClient.invalidateQueries({ queryKey: ['ohlcv'] });
+      queryClient.invalidateQueries({ queryKey: ['open-interest'] });
+      queryClient.invalidateQueries({ queryKey: ['analytics'] });
     },
   });
 }
@@ -110,6 +131,9 @@ export function useIncrementalFetch() {
       queryClient.invalidateQueries({ queryKey: ['status'] });
       queryClient.invalidateQueries({ queryKey: ['funding-rates'] });
       queryClient.invalidateQueries({ queryKey: ['logs'] });
+      queryClient.invalidateQueries({ queryKey: ['ohlcv'] });
+      queryClient.invalidateQueries({ queryKey: ['open-interest'] });
+      queryClient.invalidateQueries({ queryKey: ['analytics'] });
     },
   });
 }

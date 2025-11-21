@@ -150,3 +150,34 @@ export interface FetchedLongShortRatioData {
   type: string;
   period: string;
 }
+
+export interface BybitLiquidationItem {
+  symbol: string;
+  side: 'Buy' | 'Sell';
+  size: string; // Quantity
+  price: string;
+  time: string; // Unix timestamp in milliseconds as string
+  updatedTime: string;
+}
+
+export interface BybitLiquidationResponse {
+  retCode: number;
+  retMsg: string;
+  result: {
+    category: string;
+    list: BybitLiquidationItem[];
+    nextPageCursor: string;
+  };
+  retExtInfo: {};
+  time: number;
+}
+
+export interface FetchedLiquidationData {
+  asset: string;
+  timestamp: Date;
+  side: 'Long' | 'Short';
+  price: number;
+  quantity: number;
+  volumeUsd: number;
+  platform: string;
+}

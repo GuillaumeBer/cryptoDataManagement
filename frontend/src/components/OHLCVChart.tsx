@@ -53,16 +53,9 @@ interface OHLCVChartProps {
   platform: string;
 }
 
-type AxisMapEntry = {
-  scale?: (value: number) => number;
-};
 
-type AxisMap = Record<string | number, AxisMapEntry>;
 
-interface CustomizedLayerProps {
-  xAxisMap?: AxisMap;
-  yAxisMap?: AxisMap;
-}
+
 
 // Create candlestick renderer with data closure
 const createCandlestickRenderer = (chartData: ChartCandle[], candleWidth: number = 10) => {
@@ -82,7 +75,7 @@ const createCandlestickRenderer = (chartData: ChartCandle[], candleWidth: number
 
     return (
       <g className="candlesticks">
-        {chartData.map((candle, index) => {
+        {chartData.map((candle) => {
           const x = xAxis.scale(candle.timestamp);
           const highY = yAxis.scale(candle.high);
           const lowY = yAxis.scale(candle.low);

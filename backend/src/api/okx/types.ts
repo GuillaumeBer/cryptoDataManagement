@@ -130,3 +130,32 @@ export interface FetchedLongShortRatioData {
   type: 'global_account';
   period: string;
 }
+
+export interface OKXLiquidationOrder {
+  instId: string;
+  side: 'buy' | 'sell';
+  posSide: 'long' | 'short' | 'net';
+  bkPx: string; // Bankruptcy price
+  sz: string; // Size
+  bkLoss: string; // Bankruptcy loss
+  ts: string; // Timestamp in milliseconds
+}
+
+export interface OKXLiquidationResponse {
+  code: string;
+  msg: string;
+  data: {
+    details: OKXLiquidationOrder[];
+    ts: string;
+  }[];
+}
+
+export interface FetchedLiquidationData {
+  asset: string;
+  timestamp: Date;
+  side: 'Long' | 'Short';
+  price: number;
+  quantity: number;
+  volumeUsd: number;
+  platform: string;
+}

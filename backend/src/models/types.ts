@@ -99,94 +99,23 @@ export interface OHLCVQuery {
   startDate?: Date;
   endDate?: Date;
   platform?: string;
-  timeframe?: string; // Filter by timeframe ('1m', '1h', '1d', etc.)
+  timeframe?: string;
   limit?: number;
   offset?: number;
 }
 
-export interface OHLCVDataWithAsset extends OHLCVData {
+export interface OHLCVWithAsset extends OHLCVData {
   asset_symbol: string;
   asset_name: string | null;
 }
 
-export interface AssetAnalytics {
-  symbol: string;
-  platform: string;
-  total_records: number;
-  avg_funding_rate: string;
-  min_funding_rate: string;
-  max_funding_rate: string;
-  std_dev: string;
-  first_timestamp: Date;
-  last_timestamp: Date;
-  positive_count: number;
-  negative_count: number;
-}
-
-// Unified Assets types
-export interface UnifiedAsset {
-  id: number;
-  normalized_symbol: string;
-  display_name: string | null;
-  description: string | null;
-  coingecko_id: string | null;
-  coingecko_name: string | null;
-  coingecko_symbol: string | null;
-  market_cap_usd: number | null;
-  market_cap_rank: number | null;
-  created_at: Date;
-  updated_at: Date;
-}
-
-export interface AssetMapping {
-  id: number;
-  unified_asset_id: number;
-  asset_id: number;
-  confidence_score: number;
-  mapping_method: 'auto_symbol' | 'auto_price' | 'manual';
-  price_used: string | null;
-  price_correlation: string | null;
-  last_validated_at: Date | null;
-  created_at: Date;
-  updated_at: Date;
-}
-
-export interface CreateUnifiedAssetParams {
-  normalized_symbol: string;
-  display_name?: string;
-  description?: string;
-  coingecko_id?: string;
-  coingecko_name?: string;
-  coingecko_symbol?: string;
-  market_cap_usd?: number | null;
-  market_cap_rank?: number | null;
-}
-
-export interface CreateAssetMappingParams {
-  unified_asset_id: number;
-  asset_id: number;
-  confidence_score?: number;
-  mapping_method: 'auto_symbol' | 'auto_price' | 'manual';
-  price_used?: string;
-  price_correlation?: number;
-  last_validated_at?: Date;
-}
-
-export interface UnifiedAssetWithMappings extends UnifiedAsset {
-  mappings: Array<AssetMapping & {
-    asset_symbol: string;
-    asset_platform: string;
-  }>;
-}
-
-// Open Interest types
-export interface OpenInterest {
+export interface OpenInterestData {
   id: number;
   asset_id: number;
   timestamp: Date;
-  timeframe: string; // '1h', '4h', '1d', etc.
-  open_interest: string;
-  open_interest_value: string | null;
+  timeframe: string; // '1h', '4h', etc.
+  open_interest: string; // Base asset amount
+  open_interest_value: string | null; // USD value
   platform: string;
   fetched_at: Date;
 }
@@ -211,32 +140,31 @@ export interface OpenInterestQuery {
   offset?: number;
 }
 
+export interface OpenInterestWithAsset extends OpenInterestData {
+  asset_symbol: string;
+  asset_name: string | null;
+}
 
-// Long/Short Ratio types
 export interface LongShortRatio {
   id: number;
   asset_id: number;
   timestamp: Date;
-  long_ratio: number;
-  short_ratio: number;
-  long_account: number | null;
-  short_account: number | null;
+  timeframe: string; // '5m', '15m', '30m', '1h', '4h', '1d'
+  long_account: string; // Ratio of accounts with long positions
+  short_account: string; // Ratio of accounts with short positions
+  long_short_ratio: string; // The ratio value
   platform: string;
-  type: string; // 'global_account', 'top_trader_position', 'top_trader_account'
-  period: string; // '5m', '15m', '1h', '4h', '1d'
   fetched_at: Date;
 }
 
 export interface CreateLongShortRatioParams {
   asset_id: number;
   timestamp: Date;
-  long_ratio: number;
-  short_ratio: number;
-  long_account?: number;
-  short_account?: number;
+  timeframe: string;
+  long_account: string;
+  short_account: string;
+  long_short_ratio: string;
   platform: string;
-  type: string;
-  period: string;
 }
 
 export interface LongShortRatioQuery {
@@ -245,13 +173,49 @@ export interface LongShortRatioQuery {
   startDate?: Date;
   endDate?: Date;
   platform?: string;
-  type?: string;
-  period?: string;
+  timeframe?: string;
   limit?: number;
   offset?: number;
 }
 
 export interface LongShortRatioWithAsset extends LongShortRatio {
+  asset_symbol: string;
+  asset_name: string | null;
+}
+
+export interface LiquidationRecord {
+  id: number;
+  asset_id: number;
+  timestamp: Date;
+  side: 'Long' | 'Short';
+  price: number;
+  quantity: number;
+  volume_usd: number;
+  platform: string;
+  fetched_at: Date;
+}
+
+export interface CreateLiquidationParams {
+  asset_id: number;
+  timestamp: Date;
+  side: 'Long' | 'Short';
+  price: number;
+  quantity: number;
+  volume_usd: number;
+  platform: string;
+}
+
+export interface LiquidationQuery {
+  asset?: string;
+  assetId?: number;
+  startDate?: Date;
+  endDate?: Date;
+  platform?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface LiquidationWithAsset extends LiquidationRecord {
   asset_symbol: string;
   asset_name: string | null;
 }

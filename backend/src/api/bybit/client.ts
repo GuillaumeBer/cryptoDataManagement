@@ -13,6 +13,8 @@ import {
   FetchedOIData,
   BybitAccountRatioResponse,
   FetchedLongShortRatioData,
+  BybitLiquidationResponse,
+  FetchedLiquidationData,
 } from './types';
 
 /**
@@ -783,6 +785,97 @@ export class BybitClient {
           }
 
           logger.info(`[API] ✓ ${symbol}: ${data.length} L/S records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          if (errorMsg.includes('IP_BANNED')) {
+            return;
+          }
+          logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          if (!onItemFetched) results.set(symbol, []);
+        } finally {
+          processed++;
+          if (onProgress) onProgress(symbol, processed);
+        }
+      },
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
+    );
+
+    return results;
+  }
+
+  /**
+   * Fetch recent liquidations
+   * Endpoint: GET /v5/market/recent-trade (filtered for liquidations)
+   * Note: Bybit doesn't have a dedicated liquidation endpoint in public API
+   * This is a workaround using recent trades - for production, consider WebSocket
+   *
+   * Alternative: Use insurance fund data or analyze large trades
+   *
+   * Rate Limits:
+   * - 50 requests per 2 seconds
+   */
+  async getLiquidations(
+    symbol: string,
+    limit: number = 500
+  ): Promise<FetchedLiquidationData[]> {
+    try {
+      logger.debug(`Fetching liquidations for ${symbol} from Bybit`);
+
+      // Bybit V5 doesn't have a public liquidation endpoint like Binance
+      // We'll use the insurance fund liquidation data instead
+      // Endpoint: /v5/market/insurance (for historical insurance fund data)
+      
+      // Note: This is a placeholder implementation
+      // For real liquidation data, you'd need to:
+      // 1. Use WebSocket stream for real-time liquidations
+      // 2. Parse large trades from recent-trade endpoint
+      // 3. Use a private API if available
+
+      logger.warn(`Bybit public API doesn't provide direct liquidation data for ${symbol}`);
+      return [];
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch liquidations for ${symbol}: ${errorMsg}`);
+      throw new Error(`Failed to fetch liquidations for ${symbol}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch liquidations for multiple symbols with rate limiting
+   * Note: Bybit doesn't provide public liquidation endpoint
+   */
+  async getLiquidationsBatch(
+    symbols: string[],
+    delayMs: number = 600,
+    concurrency: number = 1,
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedLiquidationData[]) => Promise<void>
+  ): Promise<Map<string, FetchedLiquidationData[]>> {
+    const results = new Map<string, FetchedLiquidationData[]>();
+
+    logger.info(`Bybit liquidation data not available via public API for ${symbols.length} assets`);
+    logger.info(`Consider using WebSocket streams or alternative data sources`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      symbols,
+      async (symbol) => {
+        if (this.isBanned) return;
+
+        try {
+          logger.info(`[API] Skipping Liquidations ${symbol} from Bybit (not available)`);
+          const data: FetchedLiquidationData[] = [];
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
+          logger.info(`[API] ✓ ${symbol}: 0 liquidation records (not supported)`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           if (errorMsg.includes('IP_BANNED')) {

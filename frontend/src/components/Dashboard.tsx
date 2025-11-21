@@ -4,6 +4,7 @@ import AssetSelector from './AssetSelector';
 import FundingRateChart from './FundingRateChart';
 import OHLCVChart from './OHLCVChart';
 import OpenInterestChart from './OpenInterestChart';
+import LongShortRatioChart from './LongShortRatioChart';
 import Analytics from './Analytics';
 import DataFetcher from './DataFetcher';
 import StatusBar from './StatusBar';
@@ -226,10 +227,14 @@ export default function Dashboard() {
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                   <FundingRateChart asset={selectedAsset} platform={selectedPlatform} />
                 </div>
-                {/* Hide OI chart for snapshot-only platforms (Hyperliquid, Aster) */}
                 {selectedPlatform !== 'hyperliquid' && selectedPlatform !== 'aster' && (
                   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                     <OpenInterestChart asset={selectedAsset} platform={selectedPlatform} />
+                  </div>
+                )}
+                {selectedPlatform !== 'hyperliquid' && selectedPlatform !== 'aster' && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <LongShortRatioChart asset={selectedAsset} platform={selectedPlatform} />
                   </div>
                 )}
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">

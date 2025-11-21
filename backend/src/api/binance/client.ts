@@ -13,6 +13,8 @@ import {
   FetchedOIData,
   BinanceLongShortRatio,
   FetchedLongShortRatioData,
+  BinanceLiquidation,
+  FetchedLiquidationData,
 } from './types';
 
 export class BinanceClient {
@@ -675,6 +677,138 @@ export class BinanceClient {
         }
       },
       { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
+    );
+
+    return results;
+  }
+
+  /**
+   * Fetch recent liquidations (force orders)
+   * Endpoint: GET /fapi/v1/forceOrders
+   *
+   * API Documentation:
+   * - Returns recent liquidation orders
+   * - Max limit: 1000 records per request
+   * - Covers approximately last 7 days
+   *
+   * Rate Limits:
+   * - Weight: 20 per request (for specific symbol)
+   * - Weight: 50 per request (all symbols)
+   */
+  async getLiquidations(
+    symbol?: string,
+    startTime?: number,
+    endTime?: number
+  ): Promise<FetchedLiquidationData[]> {
+    try {
+      logger.debug(`Fetching liquidations${symbol ? ` for ${symbol}` : ' (all symbols)'} from Binance`);
+
+      const params: any = {
+        limit: 1000,
+      };
+
+      if (symbol) {
+        params.symbol = symbol;
+      }
+
+      if (startTime) {
+        params.startTime = startTime;
+      }
+
+      if (endTime) {
+        params.endTime = endTime;
+      }
+
+      const liquidations = await this.requestWithRetry<BinanceLiquidation[]>(
+        'get',
+        '/fapi/v1/forceOrders',
+        { params }
+      );
+
+      if (!liquidations || !Array.isArray(liquidations)) {
+        logger.warn(`No liquidation data found${symbol ? ` for ${symbol}` : ''}`);
+        return [];
+      }
+
+      const results: FetchedLiquidationData[] = liquidations.map((liq) => {
+        const quantity = parseFloat(liq.executedQty);
+        const price = parseFloat(liq.avgPrice);
+        
+        return {
+          asset: liq.symbol,
+          timestamp: new Date(liq.time),
+          side: liq.side === 'LONG' ? 'Long' : 'Short',
+          price,
+          quantity,
+          volumeUsd: quantity * price,
+          platform: 'binance',
+        };
+      });
+
+      logger.debug(`Fetched ${results.length} liquidation records${symbol ? ` for ${symbol}` : ''}`);
+      return results;
+    } catch (error: any) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return [];
+      }
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch liquidations${symbol ? ` for ${symbol}` : ''}: ${errorMsg}`);
+      throw new Error(`Failed to fetch liquidations${symbol ? ` for ${symbol}` : ''}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch liquidations for multiple symbols with rate limiting
+   */
+  async getLiquidationsBatch(
+    symbols: string[],
+    daysBack: number = 7,
+    delayMs: number = 1000,
+    concurrency: number = 1,
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedLiquidationData[]) => Promise<void>
+  ): Promise<Map<string, FetchedLiquidationData[]>> {
+    const results = new Map<string, FetchedLiquidationData[]>();
+
+    logger.info(`Fetching liquidation data for ${symbols.length} assets from Binance Futures`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    // Calculate time range
+    const endTime = Date.now();
+    const startTime = endTime - (daysBack * 24 * 60 * 60 * 1000);
+
+    await runPromisePool(
+      symbols,
+      async (symbol) => {
+        if (this.isBanned) return;
+
+        try {
+          logger.info(`[API] Fetching Liquidations ${symbol} from Binance...`);
+          const data = await this.getLiquidations(symbol, startTime, endTime);
+
+          if (onItemFetched) {
+            await onItemFetched(symbol, data);
+          } else {
+            results.set(symbol, data);
+          }
+
+          logger.info(`[API] ✓ ${symbol}: ${data.length} liquidation records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          if (errorMsg.includes('IP_BANNED')) {
+            return;
+          }
+          logger.error(`[API] ✗ ${symbol}: FAILED - ${errorMsg}`);
+          if (!onItemFetched) results.set(symbol, []);
+        } finally {
+          processed++;
+          if (onProgress) onProgress(symbol, processed);
+        }
+      },
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 20 }
     );
 
     return results;

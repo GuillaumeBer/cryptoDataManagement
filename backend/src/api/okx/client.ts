@@ -14,6 +14,8 @@ import {
   FetchedOIData,
   OKXLongShortRatioResponse,
   FetchedLongShortRatioData,
+  OKXLiquidationResponse,
+  FetchedLiquidationData,
 } from './types';
 
 /**
@@ -803,6 +805,131 @@ export class OKXClient {
           }
 
           logger.info(`[API] ✓ ${instId}: ${data.length} L/S records`);
+        } catch (error) {
+          const errorMsg = this.getErrorMessage(error);
+          if (errorMsg.includes('IP_BANNED')) {
+            return;
+          }
+          logger.error(`[API] ✗ ${instId}: FAILED - ${errorMsg}`);
+          if (!onItemFetched) results.set(instId, []);
+        } finally {
+          processed++;
+          if (onProgress) onProgress(instId, processed);
+        }
+      },
+      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
+    );
+
+    return results;
+  }
+
+  /**
+   * Fetch liquidation orders
+   * Endpoint: GET /api/v5/public/liquidation-orders
+   *
+   * API Documentation:
+   * - Returns liquidation orders for a specific instrument
+   * - Provides data on forced liquidations
+   * - Max 100 records per request
+   *
+   * Rate Limits:
+   * - 20 requests per 2 seconds per IP
+   */
+  async getLiquidations(
+    instId: string,
+    state?: string,
+    limit: number = 100
+  ): Promise<FetchedLiquidationData[]> {
+    try {
+      logger.debug(`Fetching liquidations for ${instId} from OKX`);
+
+      const params: any = {
+        instType: 'SWAP',
+        uly: instId.replace('-SWAP', ''),
+        limit: limit.toString(),
+      };
+
+      if (state) {
+        params.state = state; // 'filled' or 'unfilled'
+      }
+
+      const data = await this.requestWithRetry<OKXLiquidationResponse>('get', '/api/v5/public/liquidation-orders', {
+        params,
+      });
+
+      if (data.code !== '0') {
+        throw new Error(`OKX API error: ${data.msg}`);
+      }
+
+      if (!data.data || data.data.length === 0) {
+        logger.warn(`No liquidation data found for ${instId}`);
+        return [];
+      }
+
+      const results: FetchedLiquidationData[] = [];
+      
+      for (const item of data.data) {
+        if (!item.details) continue;
+        
+        for (const detail of item.details) {
+          const quantity = parseFloat(detail.sz);
+          const price = parseFloat(detail.bkPx);
+          
+          results.push({
+            asset: detail.instId,
+            timestamp: new Date(parseInt(detail.ts)),
+            side: detail.posSide === 'long' ? 'Long' : 'Short',
+            price,
+            quantity,
+            volumeUsd: quantity * price,
+            platform: 'okx',
+          });
+        }
+      }
+
+      logger.debug(`Fetched ${results.length} liquidation records for ${instId}`);
+      return results;
+    } catch (error: any) {
+      const errorMsg = this.getErrorMessage(error);
+      logger.error(`Failed to fetch liquidations for ${instId}: ${errorMsg}`);
+      throw new Error(`Failed to fetch liquidations for ${instId}: ${errorMsg}`);
+    }
+  }
+
+  /**
+   * Fetch liquidations for multiple instruments with rate limiting
+   */
+  async getLiquidationsBatch(
+    instIds: string[],
+    delayMs: number = 600,
+    concurrency: number = 1,
+    onProgress?: (currentSymbol: string, processed: number) => void,
+    rateLimiter?: RateLimiter,
+    onItemFetched?: (symbol: string, data: FetchedLiquidationData[]) => Promise<void>
+  ): Promise<Map<string, FetchedLiquidationData[]>> {
+    const results = new Map<string, FetchedLiquidationData[]>();
+
+    logger.info(`Fetching liquidation data for ${instIds.length} assets from OKX`);
+
+    let processed = 0;
+    const safeConcurrency = Math.max(1, concurrency);
+
+    await runPromisePool(
+      instIds,
+      async (instId) => {
+        if (this.isBanned) return;
+
+        try {
+          logger.info(`[API] Fetching Liquidations ${instId} from OKX...`);
+          const data = await this.getLiquidations(instId, 'filled', 100);
+
+          if (onItemFetched) {
+            await onItemFetched(instId, data);
+          } else {
+            results.set(instId, data);
+          }
+
+          logger.info(`[API] ✓ ${instId}: ${data.length} liquidation records`);
         } catch (error) {
           const errorMsg = this.getErrorMessage(error);
           if (errorMsg.includes('IP_BANNED')) {

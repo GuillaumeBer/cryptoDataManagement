@@ -87,3 +87,26 @@ export interface FetchedLongShortRatioData {
   type: string;
   period: string;
 }
+
+export interface BinanceLiquidation {
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  order: 'LIMIT' | 'MARKET';
+  timeInForce: string;
+  origQty: string;
+  price: string;
+  avgPrice: string;
+  executedQty: string;
+  status: string;
+  time: number; // Unix timestamp in milliseconds
+}
+
+export interface FetchedLiquidationData {
+  asset: string;
+  timestamp: Date;
+  side: 'Long' | 'Short';
+  price: number;
+  quantity: number;
+  volumeUsd: number;
+  platform: string;
+}

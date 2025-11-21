@@ -71,6 +71,20 @@ export interface OpenInterestRecord {
   asset_name: string | null;
 }
 
+export interface LongShortRatioRecord {
+  id: number;
+  asset_id: number;
+  timestamp: string;
+  timeframe: string;
+  long_account: number;
+  short_account: number;
+  long_short_ratio: number;
+  platform: string;
+  fetched_at: string;
+  asset_symbol: string;
+  asset_name: string | null;
+}
+
 export type ProgressPhase = 'fetch' | 'resample';
 
 export type FetchStage =

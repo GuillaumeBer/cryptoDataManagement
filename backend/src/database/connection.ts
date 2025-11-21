@@ -67,6 +67,7 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
     return result;
   } catch (error) {
     logger.error('Database query error', { text, error });
+    console.error('FULL DB ERROR:', error);
     throw error;
   }
 }

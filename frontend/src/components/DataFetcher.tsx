@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useProgressStream } from '../hooks/useProgressStream';
 import { useToast } from '../hooks/useToast';
@@ -10,44 +10,33 @@ interface DataFetcherProps {
   selectedAsset?: string | null;
 }
 
-const STREAMING_STATUSES = new Set(['connecting', 'connected', 'reconnecting']);
-
 export default function DataFetcher({ platform, selectedAsset }: DataFetcherProps) {
   const queryClient = useQueryClient();
   const { addToast } = useToast();
-  const [fetchType, setFetchType] = useState<'initial' | 'incremental'>('initial');
 
   const { progress, status: streamStatus, error: streamError, currentType, start, stop, hydrateProgress } =
     useProgressStream(platform);
 
+  const isFetching = streamStatus === 'connecting' || streamStatus === 'connected' || streamStatus === 'reconnecting';
+  const activeFetchType = currentType;
+
+  const invalidateQueries = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['status', platform] });
+    queryClient.invalidateQueries({ queryKey: ['assets', platform] });
+    queryClient.invalidateQueries({ queryKey: ['funding-history'] });
+    queryClient.invalidateQueries({ queryKey: ['ohlcv'] });
+    queryClient.invalidateQueries({ queryKey: ['open-interest'] });
+    queryClient.invalidateQueries({ queryKey: ['long-short-ratios'] });
+    if (selectedAsset) {
+      queryClient.invalidateQueries({ queryKey: ['analytics', selectedAsset, platform] });
+    }
+  }, [queryClient, platform, selectedAsset]);
+
   const lastTerminalEventRef = useRef<string | null>(null);
   const lastStreamErrorRef = useRef<string | null>(null);
 
-  const isFetching = useMemo(() => STREAMING_STATUSES.has(streamStatus), [streamStatus]);
-  const activeFetchType = currentType ?? fetchType;
-
-  const invalidateQueries = useCallback(() => {
-    const invalidations: Promise<unknown>[] = [
-      queryClient.invalidateQueries({ queryKey: ['status', platform] }),
-      queryClient.invalidateQueries({ queryKey: ['assets', platform] }),
-      queryClient.invalidateQueries({
-        predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === 'logs',
-      }),
-      queryClient.invalidateQueries({
-        predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === 'funding-rates',
-      }),
-    ];
-
-    if (selectedAsset) {
-      invalidations.push(queryClient.invalidateQueries({ queryKey: ['analytics', selectedAsset, platform] }));
-    }
-
-    return Promise.all(invalidations);
-  }, [platform, queryClient, selectedAsset]);
-
   useEffect(() => {
     if (!progress) {
-      lastTerminalEventRef.current = null;
       return;
     }
 
@@ -83,7 +72,6 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
 
   useEffect(() => {
     stop();
-    setFetchType('initial');
     hydrateProgress(null);
 
     const checkOngoingFetch = async () => {
@@ -92,7 +80,6 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
         const fetchState = status.fetchInProgress;
         if (fetchState?.isInitialFetchInProgress || fetchState?.isIncrementalFetchInProgress) {
           const type = fetchState.isInitialFetchInProgress ? 'initial' : 'incremental';
-          setFetchType(type);
           if (fetchState.currentProgress) {
             hydrateProgress(fetchState.currentProgress);
           }
@@ -112,13 +99,11 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
       const status = await apiClient.getStatus(platform);
       const hasData = status?.fundingRateCount > 0;
       const type: 'initial' | 'incremental' = hasData ? 'incremental' : 'initial';
-      setFetchType(type);
       hydrateProgress(null);
       addToast(`Starting ${type} fetch on ${platform}`, 'info');
       start(type);
     } catch (error) {
       addToast('Unable to determine fetch type. Starting initial fetch.', 'error');
-      setFetchType('initial');
       hydrateProgress(null);
       start('initial');
     }
