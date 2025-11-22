@@ -27,6 +27,7 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
     queryClient.invalidateQueries({ queryKey: ['ohlcv'] });
     queryClient.invalidateQueries({ queryKey: ['open-interest'] });
     queryClient.invalidateQueries({ queryKey: ['long-short-ratios'] });
+    queryClient.invalidateQueries({ queryKey: ['liquidations'] });
     if (selectedAsset) {
       queryClient.invalidateQueries({ queryKey: ['analytics', selectedAsset, platform] });
     }
@@ -51,10 +52,11 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
       );
       invalidateQueries();
     } else if (progress.type === 'error') {
-      const key = `error-${progress.errors.join('-')}`;
+      const errors = progress.errors ?? [];
+      const key = `error-${errors.join('-')}`;
       if (lastTerminalEventRef.current === key) return;
       lastTerminalEventRef.current = key;
-      addToast(progress.errors[0] ?? 'Fetch failed', 'error');
+      addToast(errors[0] ?? 'Fetch failed', 'error');
       invalidateQueries();
     }
   }, [progress, addToast, invalidateQueries]);
@@ -153,8 +155,8 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
       return (
         <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded">
           <p className="text-sm text-red-800">✗ Failed to fetch data</p>
-          {current.errors.length > 0 && (
-            <p className="text-xs text-red-600 mt-1">{current.errors[0]}</p>
+          {((current.errors?.length ?? 0) > 0) && (
+            <p className="text-xs text-red-600 mt-1">{current.errors?.[0]}</p>
           )}
         </div>
       );
@@ -177,8 +179,8 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
               ? `✓ Completed! ${current.resampleRecordsCreated ?? 0} aggregated records generated across ${current.resampleAssetsProcessed ?? 0} assets`
               : `✓ Completed! Fetched ${current.recordsFetched} records from ${current.processedAssets} assets`}
           </p>
-          {current.errors.length > 0 && (
-            <p className="text-xs text-orange-600 mt-1">{current.errors.length} errors occurred</p>
+          {(current.errors?.length ?? 0) > 0 && (
+            <p className="text-xs text-orange-600 mt-1">{current.errors?.length} errors occurred</p>
           )}
           {current.phase === 'resample' && (
             <p className="text-xs text-gray-600 mt-1">Hyperliquid data is ready for 8-hour comparisons.</p>
@@ -215,6 +217,9 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
                 Assets processed: {current.processedAssets} / {current.totalAssets}
               </span>
               <span>Funding records: {current.recordsFetched}</span>
+              {typeof current.liquidationRecordsFetched === 'number' && (
+                <span>Liquidation records: {current.liquidationRecordsFetched}</span>
+              )}
               {typeof current.ohlcvRecordsFetched === 'number' && (
                 <span>OHLCV records: {current.ohlcvRecordsFetched}</span>
               )}

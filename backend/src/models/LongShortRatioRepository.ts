@@ -114,8 +114,8 @@ export class LongShortRatioRepository {
       startDate,
       endDate,
       platform,
+      timeframe,
       type,
-      period,
       limit = 1000,
       offset = 0,
     } = params;
@@ -134,14 +134,14 @@ export class LongShortRatioRepository {
       values.push(platform);
     }
 
+    if (timeframe) {
+      conditions.push(`ls.period = $${paramIndex++}`);
+      values.push(timeframe);
+    }
+
     if (type) {
       conditions.push(`ls.type = $${paramIndex++}`);
       values.push(type);
-    }
-
-    if (period) {
-      conditions.push(`ls.period = $${paramIndex++}`);
-      values.push(period);
     }
 
     if (startDate) {
@@ -158,7 +158,19 @@ export class LongShortRatioRepository {
 
     const sql = `
       SELECT
-        ls.*,
+        ls.id,
+        ls.asset_id,
+        ls.timestamp,
+        ls.long_account,
+        ls.short_account,
+        ls.long_ratio AS long_short_ratio,
+        ls.long_ratio,
+        ls.short_ratio,
+        ls.platform,
+        ls.type,
+        ls.period AS timeframe,
+        ls.period,
+        ls.created_at AS fetched_at,
         a.symbol as asset_symbol,
         a.name as asset_name
       FROM long_short_ratios ls

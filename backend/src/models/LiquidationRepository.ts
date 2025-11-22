@@ -1,7 +1,7 @@
 import { Pool, QueryResult } from 'pg';
 import { getPool, query } from '../database/connection';
 import { logger } from '../utils/logger';
-import { LiquidationRecord, CreateLiquidationParams } from './types';
+import { LiquidationRecord, LiquidationWithAsset, CreateLiquidationParams } from './types';
 
 export class LiquidationRepository {
   /**
@@ -95,12 +95,13 @@ export class LiquidationRepository {
    */
   async find(params: {
     assetId?: number;
+    assetSymbol?: string;
     platform?: string;
     startDate?: Date;
     endDate?: Date;
     limit?: number;
     offset?: number;
-  }): Promise<LiquidationRecord[]> {
+  }): Promise<LiquidationWithAsset[]> {
     let text = `
       SELECT l.*, a.symbol as asset_symbol, a.name as asset_name
       FROM liquidations l
@@ -113,6 +114,12 @@ export class LiquidationRepository {
     if (params.assetId) {
       text += ` AND l.asset_id = $${paramCount}`;
       values.push(params.assetId);
+      paramCount++;
+    }
+
+    if (params.assetSymbol) {
+      text += ` AND a.symbol = $${paramCount}`;
+      values.push(params.assetSymbol);
       paramCount++;
     }
 
@@ -148,7 +155,7 @@ export class LiquidationRepository {
       paramCount++;
     }
 
-    const result = await query<LiquidationRecord>(text, values);
+    const result = await query<LiquidationWithAsset>(text, values);
     return result.rows;
   }
 
@@ -171,6 +178,16 @@ export class LiquidationRepository {
     });
 
     return map;
+  }
+
+  /**
+   * Count liquidation records for a specific platform (or all platforms when omitted)
+   */
+  async count(platform?: string): Promise<number> {
+    const condition = platform ? ' WHERE platform = $1' : '';
+    const params = platform ? [platform] : [];
+    const result = await query<{ count: string }>(`SELECT COUNT(*) as count FROM liquidations${condition}`, params);
+    return parseInt(result.rows[0]?.count ?? '0', 10);
   }
 }
 

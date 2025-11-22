@@ -35,7 +35,7 @@ export default function StatusBar({ status, isLoading, error }: StatusBarProps) 
   return (
     <div className="bg-blue-50 border-t border-blue-200">
       <div className="px-4 py-3">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <div>
             <p className="text-xs text-blue-600 font-medium">Platform</p>
             <p className="text-sm font-semibold text-blue-900 capitalize">
@@ -52,6 +52,12 @@ export default function StatusBar({ status, isLoading, error }: StatusBarProps) 
             <p className="text-xs text-blue-600 font-medium">Total Records</p>
             <p className="text-sm font-semibold text-blue-900">
               {formatLargeNumber(status.fundingRateCount)}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs text-blue-600 font-medium">Liquidations</p>
+            <p className="text-sm font-semibold text-blue-900">
+              {formatLargeNumber(status.liquidationCount ?? 0)}
             </p>
           </div>
           <div>

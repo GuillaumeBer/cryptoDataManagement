@@ -703,7 +703,10 @@ export class BybitClient {
     period: string = '1h'
   ): Promise<FetchedLongShortRatioData[]> {
     try {
-      logger.debug(`Fetching Account L/S Ratio for ${symbol} from Bybit`);
+      const ratioSymbol = this.getAccountRatioSymbol(symbol);
+      logger.debug(
+        `Fetching Account L/S Ratio for ${symbol} (using ${ratioSymbol}) from Bybit`
+      );
 
       // Calculate time range: 30 days (typical limit for ratios)
       // const daysAgo = 30;
@@ -713,7 +716,7 @@ export class BybitClient {
       const data = await this.requestWithRetry<BybitAccountRatioResponse>('get', '/v5/market/account-ratio', {
         params: {
           category: 'linear',
-          symbol,
+          symbol: ratioSymbol,
           period,
           limit: 500,
         },
@@ -804,6 +807,18 @@ export class BybitClient {
   }
 
   /**
+   * Bybit only exposes account ratio data against the USDT ticker,
+   * but some instruments are stored as *PERP symbols. Normalize them
+   * back to the USDT version before asking the API.
+   */
+  private getAccountRatioSymbol(symbol: string): string {
+    if (symbol.endsWith('PERP')) {
+      return `${symbol.slice(0, -4)}USDT`;
+    }
+    return symbol;
+  }
+
+  /**
    * Fetch recent liquidations
    * Endpoint: GET /v5/market/recent-trade (filtered for liquidations)
    * Note: Bybit doesn't have a dedicated liquidation endpoint in public API
@@ -846,8 +861,12 @@ export class BybitClient {
    */
   async getLiquidationsBatch(
     symbols: string[],
-    delayMs: number = 600,
-    concurrency: number = 1,
+    options: {
+      delayMs?: number;
+      concurrency?: number;
+      lookbackDays?: number;
+      state?: string;
+    } = {},
     onProgress?: (currentSymbol: string, processed: number) => void,
     rateLimiter?: RateLimiter,
     onItemFetched?: (symbol: string, data: FetchedLiquidationData[]) => Promise<void>
@@ -858,7 +877,7 @@ export class BybitClient {
     logger.info(`Consider using WebSocket streams or alternative data sources`);
 
     let processed = 0;
-    const safeConcurrency = Math.max(1, concurrency);
+    const safeConcurrency = Math.max(1, options.concurrency ?? 1);
 
     await runPromisePool(
       symbols,
@@ -888,7 +907,7 @@ export class BybitClient {
           if (onProgress) onProgress(symbol, processed);
         }
       },
-      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
+      { concurrency: safeConcurrency, delayMs: options.delayMs ?? 600, rateLimiter, weight: 1 }
     );
 
     return results;

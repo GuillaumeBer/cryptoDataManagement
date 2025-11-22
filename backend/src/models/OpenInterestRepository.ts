@@ -59,7 +59,9 @@ export class OpenInterestRepository {
       const result = await query(
         `INSERT INTO open_interest_data (asset_id, timestamp, timeframe, open_interest, open_interest_value, platform)
          VALUES ${values}
-         ON CONFLICT (asset_id, timestamp, platform, timeframe) DO NOTHING`,
+         ON CONFLICT (asset_id, timestamp, platform, timeframe) DO UPDATE
+         SET open_interest = EXCLUDED.open_interest,
+             open_interest_value = COALESCE(EXCLUDED.open_interest_value, open_interest_data.open_interest_value)`,
         params
       );
 

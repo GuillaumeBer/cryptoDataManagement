@@ -6,12 +6,18 @@ import AssetRepository from '../models/AssetRepository';
 import FundingRateRepository from '../models/FundingRateRepository';
 import OHLCVRepository from '../models/OHLCVRepository';
 import OpenInterestRepository from '../models/OpenInterestRepository';
+import LongShortRatioRepository from '../models/LongShortRatioRepository';
+import { liquidationRepository } from '../models/LiquidationRepository';
 import FetchLogRepository from '../models/FetchLogRepository';
 import UnifiedAssetRepository from '../models/UnifiedAssetRepository';
 import assetMappingService from '../services/assetMappingService';
 import { logger } from '../utils/logger';
 import createProgressStream from './createProgressStream';
-import type { OHLCVDataWithAsset, OpenInterestWithAsset } from '../models/types';
+import type {
+  OHLCVDataWithAsset,
+  OpenInterestWithAsset,
+  LongShortRatioQuery,
+} from '../models/types';
 
 const router = Router();
 
@@ -499,6 +505,89 @@ const openInterestQuerySchema = z
     }
   });
 
+const MAX_LONG_SHORT_RATIO_LIMIT = 10000;
+const MAX_LIQUIDATION_LIMIT = 10000;
+
+const longShortRatioQuerySchema = z
+  .object({
+    asset: z.string().trim().min(1, { message: 'asset cannot be empty' }).optional(),
+    platform: z.string().trim().min(1, { message: 'platform cannot be empty' }).optional(),
+    timeframe: z
+      .string()
+      .trim()
+      .min(1, { message: 'timeframe cannot be empty' })
+      .optional(),
+    type: z.string().trim().min(1, { message: 'type cannot be empty' }).optional(),
+    startDate: dateStringSchema.optional(),
+    endDate: dateStringSchema.optional(),
+    limit: z
+      .preprocess(value => {
+        if (typeof value === 'string' && value.trim() !== '') {
+          const parsed = Number(value);
+          return Number.isNaN(parsed) ? value : parsed;
+        }
+        return value;
+      }, z.number().int().min(1).max(MAX_LONG_SHORT_RATIO_LIMIT))
+      .optional()
+      .default(1000),
+    offset: z
+      .preprocess(value => {
+        if (typeof value === 'string' && value.trim() !== '') {
+          const parsed = Number(value);
+          return Number.isNaN(parsed) ? value : parsed;
+        }
+        return value;
+      }, z.number().int().min(0))
+      .optional()
+      .default(0),
+  })
+  .superRefine((data, ctx) => {
+    if (data.startDate && data.endDate && data.startDate > data.endDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'startDate must be before or equal to endDate',
+        path: ['startDate'],
+      });
+    }
+  });
+
+const liquidationQuerySchema = z
+  .object({
+    asset: z.string().trim().min(1, { message: 'asset cannot be empty' }).optional(),
+    platform: z.string().trim().min(1, { message: 'platform cannot be empty' }).optional(),
+    startDate: dateStringSchema.optional(),
+    endDate: dateStringSchema.optional(),
+    limit: z
+      .preprocess(value => {
+        if (typeof value === 'string' && value.trim() !== '') {
+          const parsed = Number(value);
+          return Number.isNaN(parsed) ? value : parsed;
+        }
+        return value;
+      }, z.number().int().min(1).max(MAX_LIQUIDATION_LIMIT))
+      .optional()
+      .default(1000),
+    offset: z
+      .preprocess(value => {
+        if (typeof value === 'string' && value.trim() !== '') {
+          const parsed = Number(value);
+          return Number.isNaN(parsed) ? value : parsed;
+        }
+        return value;
+      }, z.number().int().min(0))
+      .optional()
+      .default(0),
+  })
+  .superRefine((data, ctx) => {
+    if (data.startDate && data.endDate && data.startDate > data.endDate) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'startDate must be before or equal to endDate',
+        path: ['startDate'],
+      });
+    }
+  });
+
 /**
  * GET /api/open-interest
  * Get Open Interest data with filters
@@ -573,6 +662,142 @@ router.get('/open-interest', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch Open Interest data',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
+ * GET /api/long-short-ratios
+ * Get Long/Short Ratio data with filters
+ * Query params: asset, startDate, endDate, platform, timeframe, type, limit, offset
+ */
+router.get('/long-short-ratios', async (req: Request, res: Response) => {
+  try {
+    const parseResult = longShortRatioQuerySchema.safeParse(req.query);
+
+    if (!parseResult.success) {
+      const { fieldErrors, formErrors } = parseResult.error.flatten();
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid query parameters for Long/Short Ratio data',
+        errors: {
+          ...fieldErrors,
+          ...(formErrors.length ? { _errors: formErrors } : {}),
+        },
+      });
+    }
+
+    const { asset, platform, timeframe, type, startDate, endDate, limit, offset } = parseResult.data;
+
+    logger.info('[API] Long/Short ratios request', {
+      asset,
+      platform,
+      timeframe,
+      type,
+      startDate,
+      endDate,
+      limit,
+      offset,
+    });
+
+    const query: LongShortRatioQuery = { limit, offset };
+    if (asset) query.asset = asset;
+    if (platform) query.platform = platform;
+    if (timeframe) query.timeframe = timeframe;
+    if (type) query.type = type;
+    if (startDate) query.startDate = startDate;
+    if (endDate) query.endDate = endDate;
+
+    const ratios = await LongShortRatioRepository.find(query);
+    logger.info('[API] Long/Short ratios query completed', {
+      asset: query.asset || 'all',
+      platform: query.platform || 'all',
+      timeframe: query.timeframe || 'all',
+      type: query.type || 'all',
+      results: ratios.length,
+    });
+
+    res.json({
+      success: true,
+      data: ratios,
+      count: ratios.length,
+      query: {
+        asset: query.asset || 'all',
+        platform: query.platform || 'all',
+        timeframe: query.timeframe || 'all',
+        type: query.type || 'all',
+        startDate: query.startDate,
+        endDate: query.endDate,
+        limit: query.limit,
+        offset: query.offset,
+      },
+    });
+  } catch (error) {
+    logger.error('Long/Short ratios endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch Long/Short Ratio data',
+      error: `${error}`,
+    });
+  }
+});
+
+/**
+ * GET /api/liquidations
+ * Get liquidation records with filters
+ * Query params: asset, platform, startDate, endDate, limit, offset
+ */
+router.get('/liquidations', async (req: Request, res: Response) => {
+  try {
+    const parseResult = liquidationQuerySchema.safeParse(req.query);
+
+    if (!parseResult.success) {
+      const { fieldErrors, formErrors } = parseResult.error.flatten();
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid query parameters for liquidation data',
+        errors: {
+          ...fieldErrors,
+          ...(formErrors.length ? { _errors: formErrors } : {}),
+        },
+      });
+    }
+
+    const { asset, platform, startDate, endDate, limit, offset } = parseResult.data;
+
+    const query: any = { limit, offset };
+    if (asset) query.assetSymbol = asset;
+    if (platform) query.platform = platform;
+    if (startDate) query.startDate = startDate;
+    if (endDate) query.endDate = endDate;
+
+    const records = await liquidationRepository.find(query);
+    const serialized = records.map((record) => ({
+      ...record,
+      price: Number(record.price),
+      quantity: Number(record.quantity),
+      volume_usd: Number(record.volume_usd),
+    }));
+
+    res.json({
+      success: true,
+      data: serialized,
+      count: serialized.length,
+      query: {
+        asset: asset || 'all',
+        platform: platform || 'all',
+        startDate: query.startDate,
+        endDate: query.endDate,
+        limit: query.limit,
+        offset: query.offset,
+      },
+    });
+  } catch (error) {
+    logger.error('Liquidations endpoint error', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch liquidation data',
       error: `${error}`,
     });
   }

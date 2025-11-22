@@ -150,21 +150,27 @@ export interface LongShortRatio {
   asset_id: number;
   timestamp: Date;
   timeframe: string; // '5m', '15m', '30m', '1h', '4h', '1d'
-  long_account: string; // Ratio of accounts with long positions
-  short_account: string; // Ratio of accounts with short positions
+  long_account: string | null; // Ratio of accounts with long positions
+  short_account: string | null; // Ratio of accounts with short positions
   long_short_ratio: string; // The ratio value
+  long_ratio: string;
+  short_ratio: string;
   platform: string;
+  type: string;
+  period: string;
   fetched_at: Date;
 }
 
 export interface CreateLongShortRatioParams {
   asset_id: number;
   timestamp: Date;
-  timeframe: string;
-  long_account: string;
-  short_account: string;
-  long_short_ratio: string;
+  long_ratio: string;
+  short_ratio: string;
+  long_account?: string | null;
+  short_account?: string | null;
   platform: string;
+  type: string;
+  period: string;
 }
 
 export interface LongShortRatioQuery {
@@ -174,6 +180,7 @@ export interface LongShortRatioQuery {
   endDate?: Date;
   platform?: string;
   timeframe?: string;
+  type?: string;
   limit?: number;
   offset?: number;
 }

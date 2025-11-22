@@ -714,12 +714,18 @@ export class OKXClient {
 
       // For 30 days of historical data, use 1D period with limit=30
       // Similar to OI, this is the most reliable way to get history
+      const baseCurrency = instId.split('-')[0];
+
+      if (!baseCurrency) {
+        throw new Error(`Unable to derive currency parameter from instId: ${instId}`);
+      }
+
       const data = await this.requestWithRetry<OKXLongShortRatioResponse>(
         'get',
         '/api/v5/rubik/stat/contracts/long-short-account-ratio',
         {
           params: {
-            instId,
+            ccy: baseCurrency,
             period: '1D', // Daily data for 30 days
             limit: '30',
           },
@@ -901,8 +907,12 @@ export class OKXClient {
    */
   async getLiquidationsBatch(
     instIds: string[],
-    delayMs: number = 600,
-    concurrency: number = 1,
+    options: {
+      delayMs?: number;
+      concurrency?: number;
+      lookbackDays?: number;
+      state?: string;
+    } = {},
     onProgress?: (currentSymbol: string, processed: number) => void,
     rateLimiter?: RateLimiter,
     onItemFetched?: (symbol: string, data: FetchedLiquidationData[]) => Promise<void>
@@ -912,7 +922,7 @@ export class OKXClient {
     logger.info(`Fetching liquidation data for ${instIds.length} assets from OKX`);
 
     let processed = 0;
-    const safeConcurrency = Math.max(1, concurrency);
+    const safeConcurrency = Math.max(1, options.concurrency ?? 1);
 
     await runPromisePool(
       instIds,
@@ -921,7 +931,7 @@ export class OKXClient {
 
         try {
           logger.info(`[API] Fetching Liquidations ${instId} from OKX...`);
-          const data = await this.getLiquidations(instId, 'filled', 100);
+          const data = await this.getLiquidations(instId, options.state ?? 'filled', 100);
 
           if (onItemFetched) {
             await onItemFetched(instId, data);
@@ -942,7 +952,7 @@ export class OKXClient {
           if (onProgress) onProgress(instId, processed);
         }
       },
-      { concurrency: safeConcurrency, delayMs, rateLimiter, weight: 1 }
+      { concurrency: safeConcurrency, delayMs: options.delayMs ?? 600, rateLimiter, weight: 1 }
     );
 
     return results;

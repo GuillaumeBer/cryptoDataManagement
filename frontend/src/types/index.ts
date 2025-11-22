@@ -85,6 +85,20 @@ export interface LongShortRatioRecord {
   asset_name: string | null;
 }
 
+export interface LiquidationRecord {
+  id: number;
+  asset_id: number;
+  timestamp: string;
+  side: 'Long' | 'Short';
+  price: number;
+  quantity: number;
+  volume_usd: number;
+  platform: string;
+  fetched_at: string;
+  asset_symbol: string;
+  asset_name: string | null;
+}
+
 export type ProgressPhase = 'fetch' | 'resample';
 
 export type FetchStage =
@@ -93,6 +107,12 @@ export type FetchStage =
   | 'fundingStore'
   | 'ohlcvFetch'
   | 'ohlcvStore'
+  | 'oiFetch'
+  | 'oiStore'
+  | 'lsRatioFetch'
+  | 'lsRatioStore'
+  | 'liquidationFetch'
+  | 'liquidationStore'
   | 'resample';
 
 export type StageStatus = 'pending' | 'active' | 'complete';
@@ -118,6 +138,9 @@ export interface ProgressEvent {
   currentAsset?: string;
   recordsFetched: number;
   ohlcvRecordsFetched?: number;
+  oiRecordsFetched?: number;
+  lsRatioRecordsFetched?: number;
+  liquidationRecordsFetched?: number;
   resampleRecordsCreated?: number;
   resampleAssetsProcessed?: number;
   errors: string[];
@@ -162,6 +185,9 @@ export interface SystemStatus {
   platform: string;
   assetCount: number;
   fundingRateCount: number;
+  ohlcvCount?: number;
+  lsRatioCount?: number;
+  liquidationCount?: number;
   lastFetch: {
     type: string;
     completedAt: string;

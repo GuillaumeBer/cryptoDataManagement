@@ -762,9 +762,12 @@ export class BinanceClient {
    */
   async getLiquidationsBatch(
     symbols: string[],
-    daysBack: number = 7,
-    delayMs: number = 1000,
-    concurrency: number = 1,
+    options: {
+      delayMs?: number;
+      concurrency?: number;
+      lookbackDays?: number;
+      state?: string;
+    } = {},
     onProgress?: (currentSymbol: string, processed: number) => void,
     rateLimiter?: RateLimiter,
     onItemFetched?: (symbol: string, data: FetchedLiquidationData[]) => Promise<void>
@@ -773,12 +776,13 @@ export class BinanceClient {
 
     logger.info(`Fetching liquidation data for ${symbols.length} assets from Binance Futures`);
 
-    let processed = 0;
-    const safeConcurrency = Math.max(1, concurrency);
+    const lookbackDays = options.lookbackDays ?? 7;
+    const delayMs = options.delayMs ?? 1000;
+    const safeConcurrency = Math.max(1, options.concurrency ?? 1);
 
     // Calculate time range
     const endTime = Date.now();
-    const startTime = endTime - (daysBack * 24 * 60 * 60 * 1000);
+    const startTime = endTime - (lookbackDays * 24 * 60 * 60 * 1000);
 
     await runPromisePool(
       symbols,

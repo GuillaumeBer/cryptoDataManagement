@@ -5,6 +5,7 @@ import FundingRateChart from './FundingRateChart';
 import OHLCVChart from './OHLCVChart';
 import OpenInterestChart from './OpenInterestChart';
 import LongShortRatioChart from './LongShortRatioChart';
+import LiquidationChart from './LiquidationChart';
 import Analytics from './Analytics';
 import DataFetcher from './DataFetcher';
 import StatusBar from './StatusBar';
@@ -17,6 +18,7 @@ const METRICS_ROADMAP = [
   { id: 'oi', label: 'Open interest', state: 'Live now' },
   { id: 'ohlcv', label: 'OHLCV', state: 'Live now' },
   { id: 'volume', label: 'Perpetual volume', state: 'Planned' },
+  { id: 'liquidations', label: 'Liquidations', state: 'Live now' },
 ];
 
 const badgeStyles: Record<string, string> = {
@@ -227,16 +229,22 @@ export default function Dashboard() {
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                   <FundingRateChart asset={selectedAsset} platform={selectedPlatform} />
                 </div>
-                {selectedPlatform !== 'hyperliquid' && selectedPlatform !== 'aster' && (
+                {selectedPlatform !== 'hyperliquid' &&
+                  selectedPlatform !== 'aster' &&
+                  selectedPlatform !== 'okx' && (
                   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                     <OpenInterestChart asset={selectedAsset} platform={selectedPlatform} />
                   </div>
                 )}
-                {selectedPlatform !== 'hyperliquid' && selectedPlatform !== 'aster' && (
+                {selectedPlatform !== 'hyperliquid' &&
+                  selectedPlatform !== 'aster' && (
                   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                     <LongShortRatioChart asset={selectedAsset} platform={selectedPlatform} />
                   </div>
                 )}
+                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                  <LiquidationChart asset={selectedAsset} platform={selectedPlatform} />
+                </div>
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                   <OHLCVChart asset={selectedAsset} platform={selectedPlatform} />
                 </div>

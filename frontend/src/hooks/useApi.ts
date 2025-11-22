@@ -86,6 +86,21 @@ export function useLongShortRatios(params: {
   });
 }
 
+export function useLiquidations(params: {
+  asset?: string;
+  platform?: string;
+  startDate?: Date;
+  endDate?: Date;
+  limit?: number;
+  offset?: number;
+}) {
+  return useQuery({
+    queryKey: ['liquidations', params],
+    queryFn: () => apiClient.getLiquidations(params),
+    enabled: !!params.asset && !!params.platform,
+  });
+}
+
 // Analytics hooks
 export function useAssetAnalytics(asset: string | null, platform: string = 'hyperliquid') {
   return useQuery({
@@ -117,6 +132,7 @@ export function useInitialFetch() {
       queryClient.invalidateQueries({ queryKey: ['funding-rates'] });
       queryClient.invalidateQueries({ queryKey: ['ohlcv'] });
       queryClient.invalidateQueries({ queryKey: ['open-interest'] });
+      queryClient.invalidateQueries({ queryKey: ['liquidations'] });
       queryClient.invalidateQueries({ queryKey: ['analytics'] });
     },
   });
@@ -133,6 +149,7 @@ export function useIncrementalFetch() {
       queryClient.invalidateQueries({ queryKey: ['logs'] });
       queryClient.invalidateQueries({ queryKey: ['ohlcv'] });
       queryClient.invalidateQueries({ queryKey: ['open-interest'] });
+      queryClient.invalidateQueries({ queryKey: ['liquidations'] });
       queryClient.invalidateQueries({ queryKey: ['analytics'] });
     },
   });

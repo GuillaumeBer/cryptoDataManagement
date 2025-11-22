@@ -34,7 +34,6 @@ export default function LongShortRatioChart({ asset, platform }: LongShortRatioC
     platform,
     startDate: dateRange !== 'all' ? startDate : undefined,
     endDate,
-    timeframe: '1h', // Default to 1h, but backend might return other intervals depending on platform
     limit: 1000,
   });
 

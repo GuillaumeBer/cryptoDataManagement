@@ -10,6 +10,7 @@ import type {
   OHLCVRecord,
   OpenInterestRecord,
   LongShortRatioRecord,
+  LiquidationRecord,
 } from '../types';
 
 class ApiClient {
@@ -154,6 +155,29 @@ class ApiClient {
     }
 
     const response = await this.client.get<ApiResponse<LongShortRatioRecord[]>>('/long-short-ratios', {
+      params: queryParams,
+    });
+    return response.data.data ?? [];
+  }
+
+  async getLiquidations(params: {
+    asset?: string;
+    platform?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+    offset?: number;
+  }): Promise<LiquidationRecord[]> {
+    const queryParams: Record<string, any> = { ...params };
+
+    if (queryParams.startDate) {
+      queryParams.startDate = queryParams.startDate.toISOString();
+    }
+    if (queryParams.endDate) {
+      queryParams.endDate = queryParams.endDate.toISOString();
+    }
+
+    const response = await this.client.get<ApiResponse<LiquidationRecord[]>>('/liquidations', {
       params: queryParams,
     });
     return response.data.data ?? [];
