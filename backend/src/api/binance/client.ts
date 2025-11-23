@@ -25,20 +25,29 @@ export class BinanceClient {
   constructor() {
     // Binance Futures API base URL
     this.baseURL = process.env.BINANCE_API_URL || 'https://fapi.binance.com';
+    
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    };
+
+    // Add API key if present
+    if (process.env.BINANCE_API_KEY) {
+      headers['X-MBX-APIKEY'] = process.env.BINANCE_API_KEY;
+    }
+
     this.client = axios.create({
       baseURL: this.baseURL,
       timeout: parseInt(process.env.API_TIMEOUT || '30000'),
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
     });
 
-    logger.info('Binance Futures API client initialized', { baseURL: this.baseURL });
+    logger.info('Binance Futures API client initialized', { 
+      baseURL: this.baseURL,
+      hasApiKey: !!process.env.BINANCE_API_KEY 
+    });
   }
 
-  /**
-   * Check if IP is currently banned
-   */
   public isBannedStatus(): boolean {
     return this.isBanned;
   }
@@ -700,6 +709,12 @@ export class BinanceClient {
     startTime?: number,
     endTime?: number
   ): Promise<FetchedLiquidationData[]> {
+    // Check if API key is present
+    if (!process.env.BINANCE_API_KEY) {
+      logger.debug('Skipping liquidation fetch: BINANCE_API_KEY not configured');
+      return [];
+    }
+
     try {
       logger.debug(`Fetching liquidations${symbol ? ` for ${symbol}` : ' (all symbols)'} from Binance`);
 
@@ -783,6 +798,8 @@ export class BinanceClient {
     // Calculate time range
     const endTime = Date.now();
     const startTime = endTime - (lookbackDays * 24 * 60 * 60 * 1000);
+    
+    let processed = 0;
 
     await runPromisePool(
       symbols,

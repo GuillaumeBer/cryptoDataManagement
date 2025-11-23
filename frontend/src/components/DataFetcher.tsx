@@ -190,7 +190,55 @@ export default function DataFetcher({ platform, selectedAsset }: DataFetcherProp
     }
 
     if (current) {
-      const stageDetails = current.stages ?? [];
+      let stageDetails = current.stages ?? [];
+      if (platform === 'hyperliquid') {
+        const excludedStages = [
+          'liquidationFetch',
+          'liquidationStore',
+          'lsRatioFetch',
+          'lsRatioStore',
+          'oiFetch',
+          'oiStore',
+        ];
+        stageDetails = stageDetails.filter((stage) => !excludedStages.includes(stage.key));
+      } else if (platform === 'dydx') {
+        const excludedStages = [
+          'liquidationFetch',
+          'liquidationStore',
+          'lsRatioFetch',
+          'lsRatioStore',
+        ];
+        stageDetails = stageDetails.filter((stage) => !excludedStages.includes(stage.key));
+      } else if (platform === 'aster') {
+        const excludedStages = [
+          'liquidationFetch',
+          'liquidationStore',
+          'lsRatioFetch',
+          'lsRatioStore',
+          'oiFetch',
+          'oiStore',
+        ];
+        stageDetails = stageDetails.filter((stage) => !excludedStages.includes(stage.key));
+      } else if (platform === 'binance') {
+        const excludedStages = [
+          'liquidationFetch',
+          'liquidationStore',
+        ];
+        stageDetails = stageDetails.filter((stage) => !excludedStages.includes(stage.key));
+      } else if (platform === 'bybit') {
+        const excludedStages = [
+          'liquidationFetch',
+          'liquidationStore',
+        ];
+        stageDetails = stageDetails.filter((stage) => !excludedStages.includes(stage.key));
+      } else if (platform === 'okx') {
+        const excludedStages = [
+          'liquidationFetch',
+          'liquidationStore',
+        ];
+        stageDetails = stageDetails.filter((stage) => !excludedStages.includes(stage.key));
+      }
+
       const activeStage =
         stageDetails.find((stage) => stage.status === 'active') ??
         (stageDetails.length > 0 ? stageDetails[stageDetails.length - 1] : undefined);

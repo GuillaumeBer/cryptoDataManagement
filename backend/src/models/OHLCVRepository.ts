@@ -1,7 +1,7 @@
 import { query } from '../database/connection';
 import {
   OHLCVData,
-  OHLCVDataWithAsset,
+  OHLCVWithAsset,
   OHLCVQuery,
   CreateOHLCVParams,
 } from './types';
@@ -99,7 +99,7 @@ export class OHLCVRepository {
   /**
    * Query OHLCV data with filters
    */
-  async find(params: OHLCVQuery): Promise<OHLCVDataWithAsset[]> {
+  async find(params: OHLCVQuery): Promise<OHLCVWithAsset[]> {
     const { asset, assetId, startDate, endDate, platform, timeframe, limit = 1000, offset = 0 } = params;
 
     const conditions: string[] = [];
@@ -152,7 +152,113 @@ export class OHLCVRepository {
 
     values.push(limit, offset);
 
-    const result = await query<OHLCVDataWithAsset>(sql, values);
+    const result = await query<OHLCVWithAsset>(sql, values);
+    return result.rows;
+  }
+
+  /**
+   * Get aggregated OHLCV data (resampled from 1h data)
+   */
+  async getAggregatedOHLCV(params: OHLCVQuery): Promise<OHLCVWithAsset[]> {
+    const { asset, assetId, startDate, endDate, platform, timeframe, limit = 1000, offset = 0 } = params;
+
+    if (!timeframe || timeframe === '1h') {
+      return this.find(params);
+    }
+
+    const conditions: string[] = [];
+    const values: any[] = [];
+    let paramIndex = 1;
+
+    // We only aggregate 1h data
+    conditions.push(`o.timeframe = '1h'`);
+
+    if (asset) {
+      conditions.push(`a.symbol = $${paramIndex++}`);
+      values.push(asset);
+    }
+
+    if (assetId) {
+      conditions.push(`o.asset_id = $${paramIndex++}`);
+      values.push(assetId);
+    }
+
+    if (platform) {
+      conditions.push(`o.platform = $${paramIndex++}`);
+      values.push(platform);
+    }
+
+    if (startDate) {
+      conditions.push(`o.timestamp >= $${paramIndex++}`);
+      values.push(startDate);
+    }
+
+    if (endDate) {
+      conditions.push(`o.timestamp <= $${paramIndex++}`);
+      values.push(endDate);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // Complex aggregation query
+    // We use date_bin (Postgres 14+) or date_trunc/arithmetic for bucketing
+    // Assuming Postgres 14+ for date_bin, but using a compatible approach just in case
+    // For '4h', we can use: to_timestamp(floor((extract('epoch' from timestamp) / 14400 )) * 14400)
+    
+    let bucketExpression = `date_trunc('hour', o.timestamp)`; // Default
+    if (timeframe === '4h') {
+       // Bucket into 4-hour intervals starting at 00:00
+       bucketExpression = `to_timestamp(floor((extract('epoch' from o.timestamp) / 14400 )) * 14400) at time zone 'UTC'`;
+    } else if (timeframe === '1d') {
+       bucketExpression = `date_trunc('day', o.timestamp)`;
+    }
+
+    const sql = `
+      WITH buckets AS (
+        SELECT
+          o.asset_id,
+          ${bucketExpression} as bucket_ts,
+          o.open,
+          o.high,
+          o.low,
+          o.close,
+          o.volume,
+          o.quote_volume,
+          o.trades_count,
+          o.timestamp
+        FROM ohlcv_data o
+        JOIN assets a ON o.asset_id = a.id
+        ${whereClause}
+      ),
+      aggregated AS (
+        SELECT
+          asset_id,
+          bucket_ts as timestamp,
+          (array_agg(open ORDER BY timestamp ASC))[1] as open,
+          MAX(high) as high,
+          MIN(low) as low,
+          (array_agg(close ORDER BY timestamp DESC))[1] as close,
+          SUM(volume) as volume,
+          SUM(quote_volume) as quote_volume,
+          SUM(trades_count) as trades_count
+        FROM buckets
+        GROUP BY asset_id, bucket_ts
+      )
+      SELECT
+        agg.*,
+        '${timeframe}' as timeframe,
+        a.platform as platform,
+        a.symbol as asset_symbol,
+        a.name as asset_name
+      FROM aggregated agg
+      JOIN assets a ON agg.asset_id = a.id
+      ORDER BY agg.timestamp DESC
+      LIMIT $${paramIndex++} OFFSET $${paramIndex++}
+    `;
+
+    values.push(limit, offset);
+
+    const result = await query<OHLCVWithAsset>(sql, values);
     return result.rows;
   }
 

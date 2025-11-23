@@ -34,7 +34,6 @@ const TIMEFRAME_OPTIONS = [
 const TIME_AXIS_ID = 'time-axis';
 const PRICE_AXIS_ID = 'price-axis';
 const VOLUME_AXIS_ID = 'volume-axis';
-
 type LookbackId = (typeof LOOKBACK_OPTIONS)[number]['id'];
 type TimeframeId = (typeof TIMEFRAME_OPTIONS)[number]['id'];
 
@@ -52,10 +51,6 @@ interface OHLCVChartProps {
   asset: string;
   platform: string;
 }
-
-
-
-
 
 // Create candlestick renderer with data closure
 const createCandlestickRenderer = (chartData: ChartCandle[], candleWidth: number = 10) => {
@@ -163,70 +158,31 @@ export default function OHLCVChart({ asset, platform }: OHLCVChartProps) {
     return { startDate: start, endDate: end, selectedLabel: selected.label };
   }, [range]);
 
-  // Always fetch 1h data from the API, then resample client-side
+  // Fetch data from API (now supports aggregation)
   const { data, isLoading, error, isFetching } = useOHLCVData({
     asset,
     platform,
-    timeframe: '1h', // Always fetch 1h data
+    timeframe, // Pass selected timeframe
     startDate,
     endDate,
-    limit: 10000, // Increase limit since we need more 1h candles for resampling
+    limit: 10000,
   });
-
-  // Resample 1h candles to the selected timeframe
-  const resampleCandles = (candles: ChartCandle[], targetTimeframe: TimeframeId): ChartCandle[] => {
-    if (targetTimeframe === '1h' || candles.length === 0) return candles;
-
-    const intervalMs = targetTimeframe === '4h' ? 4 * 60 * 60 * 1000 : 24 * 60 * 60 * 1000;
-    const resampled: ChartCandle[] = [];
-
-    // Group candles by target timeframe
-    const groups = new Map<number, ChartCandle[]>();
-    candles.forEach(candle => {
-      const bucketTime = Math.floor(candle.timestamp / intervalMs) * intervalMs;
-      if (!groups.has(bucketTime)) {
-        groups.set(bucketTime, []);
-      }
-      groups.get(bucketTime)!.push(candle);
-    });
-
-    // Convert groups to resampled candles
-    for (const [bucketTime, groupCandles] of groups.entries()) {
-      if (groupCandles.length === 0) continue;
-
-      groupCandles.sort((a, b) => a.timestamp - b.timestamp);
-      resampled.push({
-        timestamp: bucketTime,
-        iso: new Date(bucketTime).toISOString(),
-        open: groupCandles[0].open,
-        high: Math.max(...groupCandles.map(c => c.high)),
-        low: Math.min(...groupCandles.map(c => c.low)),
-        close: groupCandles[groupCandles.length - 1].close,
-        volume: groupCandles.reduce((sum, c) => sum + c.volume, 0),
-      });
-    }
-
-    return resampled.sort((a, b) => a.timestamp - b.timestamp);
-  };
 
   const chartData: ChartCandle[] = useMemo(() => {
     if (!data) return [];
 
-    const transformed = [...data]
+    return [...data]
       .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
       .map((entry) => ({
         timestamp: new Date(entry.timestamp).getTime(),
         iso: entry.timestamp,
-        open: entry.open,
-        high: entry.high,
-        low: entry.low,
-        close: entry.close,
-        volume: entry.volume ?? 0,
+        open: Number(entry.open),
+        high: Number(entry.high),
+        low: Number(entry.low),
+        close: Number(entry.close),
+        volume: Number(entry.volume ?? 0),
       }));
-
-    // Resample to the selected timeframe
-    return resampleCandles(transformed, timeframe);
-  }, [data, timeframe]);
+  }, [data]);
 
   const [minPrice, maxPrice] = useMemo(() => {
     if (!chartData.length) return [0, 0];

@@ -237,14 +237,22 @@ export default function Dashboard() {
                   </div>
                 )}
                 {selectedPlatform !== 'hyperliquid' &&
-                  selectedPlatform !== 'aster' && (
+                  selectedPlatform !== 'aster' &&
+                  selectedPlatform !== 'dydx' && (
                   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                     <LongShortRatioChart asset={selectedAsset} platform={selectedPlatform} />
                   </div>
                 )}
-                <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                  <LiquidationChart asset={selectedAsset} platform={selectedPlatform} />
-                </div>
+                {selectedPlatform !== 'hyperliquid' &&
+                  selectedPlatform !== 'dydx' &&
+                  selectedPlatform !== 'aster' &&
+                  selectedPlatform !== 'binance' &&
+                  selectedPlatform !== 'bybit' &&
+                  selectedPlatform !== 'okx' && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <LiquidationChart asset={selectedAsset} platform={selectedPlatform} />
+                  </div>
+                )}
                 <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                   <OHLCVChart asset={selectedAsset} platform={selectedPlatform} />
                 </div>

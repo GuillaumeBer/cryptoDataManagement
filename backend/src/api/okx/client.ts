@@ -552,9 +552,9 @@ export class OKXClient {
    *
    * API Documentation:
    * - Returns historical open interest data
-   * - Supports periods: 5m, 1H, 1D
+   * - Supports periods: 5m, 1H, 4H, 1D
    * - Returns up to 100 data points per request
-   * - For 30 days of data, we use period='1D' with limit=30 (most efficient)
+   * - Uses 'end' parameter for pagination (fetching older data)
    *
    * Rate Limits:
    * - 20 requests per 2 seconds (~600 req/min)
@@ -562,52 +562,86 @@ export class OKXClient {
    * Response Format:
    * - Array of arrays: [timestamp, oi_contracts, oi_base_ccy, oi_usd_value]
    *
-   * Note: The 'before' pagination parameter doesn't work reliably for this endpoint,
-   * so we use daily granularity (1D) to fetch 30 days of data in a single request.
-   *
    * @param instId - Instrument ID (e.g., "BTC-USDT-SWAP")
-   * @param period - Time period (ignored, always uses '1D' for 30 days of data)
-   * @returns Array of open interest data points (30 days of daily data)
+   * @param period - Time period (default: '1H')
+   * @returns Array of open interest data points
    */
   async getOpenInterest(instId: string, period: string = '1H'): Promise<FetchedOIData[]> {
     try {
-      logger.debug(`Fetching open interest history for ${instId} from OKX (30 days of daily data)`);
+      logger.debug(`Fetching open interest history for ${instId} from OKX`);
 
-      // For 30 days of historical data, use 1D period with limit=30
-      // This is the most efficient and reliable approach
-      const data = await this.requestWithRetry<OKXOpenInterestHistoryResponse>(
-        'get',
-        '/api/v5/rubik/stat/contracts/open-interest-history',
-        {
-          params: {
-            instId,
-            period: '1D', // Daily data for 30 days
-            limit: '30',  // 30 days
-          },
+      // Calculate time range: 480 hours ago (same as funding/OHLCV)
+      const hoursAgo = 480;
+      const targetStart = Date.now() - hoursAgo * 60 * 60 * 1000;
+
+      const allResults: FetchedOIData[] = [];
+      let currentEnd: string | undefined = undefined;
+      let safetyCounter = 0;
+      const maxBatches = 20; // 20 * 100 records
+
+      while (safetyCounter < maxBatches) {
+        const params: any = {
+          instId,
+          period,
+          limit: '100',
+        };
+
+        if (currentEnd) {
+          params.end = currentEnd;
         }
+
+        const data = await this.requestWithRetry<OKXOpenInterestHistoryResponse>(
+          'get',
+          '/api/v5/rubik/stat/contracts/open-interest-history',
+          { params }
+        );
+
+        // Check if request was successful
+        if (data.code !== '0') {
+          throw new Error(`OKX API error: ${data.msg}`);
+        }
+
+        const oiData = data.data;
+        if (!oiData || !Array.isArray(oiData) || oiData.length === 0) {
+          break; // No more data
+        }
+
+        // Parse the array format: [timestamp, oi_contracts, oi_base_ccy, oi_usd_value]
+        const batchResults: FetchedOIData[] = oiData
+          .map((point) => ({
+            asset: instId,
+            timestamp: new Date(parseInt(point[0])),
+            openInterest: point[1], // OI in contracts
+            openInterestValue: point[3], // OI value in USD
+          }))
+          .filter((record) => record.timestamp.getTime() >= targetStart);
+
+        allResults.push(...batchResults);
+
+        const oldestTimestamp = parseInt(oiData[oiData.length - 1][0]);
+        const exhaustedBatch = oiData.length < 100;
+
+        if (oldestTimestamp <= targetStart || exhaustedBatch) {
+          break;
+        }
+
+        // Update currentEnd for next page (use oldest timestamp from current batch)
+        currentEnd = oldestTimestamp.toString();
+        safetyCounter++;
+
+        // Small delay between pagination requests
+        await this.sleep(200);
+      }
+
+      // Deduplicate by timestamp (OKX API may return duplicates across pagination boundaries)
+      const uniqueResults = Array.from(
+        new Map(
+          allResults.map(item => [item.timestamp.getTime(), item])
+        ).values()
       );
 
-      // Check if request was successful
-      if (data.code !== '0') {
-        throw new Error(`OKX API error: ${data.msg}`);
-      }
-
-      const oiData = data.data;
-      if (!oiData || !Array.isArray(oiData) || oiData.length === 0) {
-        logger.warn(`No open interest history found for ${instId}`);
-        return [];
-      }
-
-      // Parse the array format: [timestamp, oi_contracts, oi_base_ccy, oi_usd_value]
-      const results: FetchedOIData[] = oiData.map((point) => ({
-        asset: instId,
-        timestamp: new Date(parseInt(point[0])),
-        openInterest: point[1], // OI in contracts
-        openInterestValue: point[3], // OI value in USD
-      }));
-
-      logger.debug(`Fetched ${results.length} open interest history records for ${instId} (spanning ~${results.length} days)`);
-      return results;
+      logger.debug(`Fetched ${uniqueResults.length} unique open interest history records for ${instId} (${allResults.length} total, ${allResults.length - uniqueResults.length} duplicates removed)`);
+      return uniqueResults;
     } catch (error: any) {
       const errorMsg = this.getErrorMessage(error);
       logger.error(`Failed to fetch open interest history for ${instId}: ${errorMsg}`);
@@ -868,7 +902,7 @@ export class OKXClient {
       }
 
       if (!data.data || data.data.length === 0) {
-        logger.warn(`No liquidation data found for ${instId}`);
+        logger.debug(`No liquidation data found for ${instId}`);
         return [];
       }
 

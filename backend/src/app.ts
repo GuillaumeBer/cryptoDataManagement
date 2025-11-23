@@ -5,6 +5,7 @@ import compression from 'compression';
 import apiRoutes from './routes/api';
 import { logger } from './utils/logger';
 import allowedOrigins from './config/allowedOrigins';
+import { errorHandler } from './middleware/errorHandler';
 
 export function createApp(): Express {
   const app = express();
@@ -75,19 +76,8 @@ export function createApp(): Express {
     });
   });
 
-  app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
-    logger.error('Unhandled error', {
-      error: err.message,
-      stack: err.stack,
-      path: req.path,
-    });
-
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined,
-    });
-  });
+  // Global error handler
+  app.use(errorHandler);
 
   return app;
 }
